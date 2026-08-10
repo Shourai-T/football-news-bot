@@ -37,6 +37,7 @@ export async function fetchFeedEntries(
   feeds: FeedDefinition[],
   fetcher: Fetcher,
   now: Date,
+  onFeedFailure?: () => void,
 ): Promise<Article[]> {
   const results = await Promise.allSettled(
     feeds.map((feed) => fetchSingleFeed(feed, fetcher, now)),
@@ -44,7 +45,10 @@ export async function fetchFeedEntries(
   const bestByUrl = new Map<string, Article>();
 
   for (const result of results) {
-    if (result.status === "rejected") continue;
+    if (result.status === "rejected") {
+      onFeedFailure?.();
+      continue;
+    }
     for (const entry of result.value) {
       const existing = bestByUrl.get(entry.canonicalUrl);
       if (!existing || isBetterDuplicate(entry, existing)) {
