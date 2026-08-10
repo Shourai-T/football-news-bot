@@ -41,16 +41,29 @@ export async function fetchFeedEntries(
   const results = await Promise.allSettled(
     feeds.map((feed) => fetchSingleFeed(feed, fetcher, now)),
   );
-  const seenUrls = new Set<string>();
+  const bestByUrl = new Map<string, Article>();
 
-  return results.flatMap((result) => {
-    if (result.status === "rejected") return [];
-    return result.value.filter((entry) => {
-      if (seenUrls.has(entry.canonicalUrl)) return false;
-      seenUrls.add(entry.canonicalUrl);
-      return true;
-    });
-  });
+  for (const result of results) {
+    if (result.status === "rejected") continue;
+    for (const entry of result.value) {
+      const existing = bestByUrl.get(entry.canonicalUrl);
+      if (!existing || isBetterDuplicate(entry, existing)) {
+        bestByUrl.set(entry.canonicalUrl, entry);
+      }
+    }
+  }
+
+  return [...bestByUrl.values()];
+}
+
+function isBetterDuplicate(candidate: Article, existing: Article): boolean {
+  if (candidate.sourcePriority !== existing.sourcePriority) {
+    return candidate.sourcePriority > existing.sourcePriority;
+  }
+  if (candidate.topicScore !== existing.topicScore) {
+    return candidate.topicScore > existing.topicScore;
+  }
+  return candidate.publishedAt.getTime() > existing.publishedAt.getTime();
 }
 
 async function fetchSingleFeed(

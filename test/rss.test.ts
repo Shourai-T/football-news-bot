@@ -64,6 +64,28 @@ describe("RSS normalization", () => {
     ]);
   });
 
+  it("retains higher-priority metadata when a later feed repeats a canonical URL", async () => {
+    const feeds = [
+      { name: "Low priority", url: "https://low.test/rss", priority: 1 },
+      { name: "High priority", url: "https://high.test/rss", priority: 10 },
+    ];
+    const fetcher: typeof fetch = async (input) => {
+      const highPriority = input.toString().includes("high.test");
+      return new Response(
+        `<rss><channel><item><title>${highPriority ? "Ronaldo transfer" : "Ronaldo update"}</title><link>https://example.test/story?utm_source=rss&amp;id=9</link><description>Latest football news</description><pubDate>${highPriority ? "2026-08-10T11:00:00Z" : "2026-08-10T10:00:00Z"}</pubDate></item></channel></rss>`,
+        { status: 200 },
+      );
+    };
+
+    await expect(fetchFeedEntries(feeds, fetcher, NOW)).resolves.toMatchObject([
+      {
+        canonicalUrl: "https://example.test/story?id=9",
+        sourceName: "High priority",
+        sourcePriority: 10,
+      },
+    ]);
+  });
+
   it("returns entries from healthy feeds when another feed fails or returns malformed XML", async () => {
     const feeds = [
       { name: "Failed", url: "https://failed.test/rss", priority: 1 },
