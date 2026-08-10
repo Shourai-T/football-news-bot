@@ -51,9 +51,18 @@ describe("generateDraft", () => {
     expect(prompt).toContain(article.canonicalUrl);
     expect(prompt).toContain("Do not invent");
     expect(prompt).toContain("English");
+    expect(prompt).toContain("3,000 characters");
+    expect(body).toMatchObject({ generationConfig: { maxOutputTokens: 1024 } });
     expect(prompt).not.toContain(article.publishedAt.toISOString());
-    expect(prompt).not.toContain(String(article.sourcePriority));
-    expect(prompt).not.toContain(String(article.topicScore));
+    expect(prompt).not.toContain("Source priority:");
+    expect(prompt).not.toContain("Topic score:");
+  });
+
+  it("bounds an overlong Gemini candidate before it reaches Telegram", async () => {
+    const fetcher: typeof fetch = async () =>
+      Response.json({ candidates: [{ content: { parts: [{ text: "x".repeat(3_500) }] } }] });
+
+    await expect(generateDraft(article, config, fetcher)).resolves.toHaveLength(3_000);
   });
 
   it("rejects an empty Gemini candidate", async () => {

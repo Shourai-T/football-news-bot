@@ -13,6 +13,7 @@ interface CallbackQuery {
   id: string;
   data: string;
   chatId: string;
+  messageId: number;
 }
 
 export async function handleTelegramWebhook(
@@ -61,6 +62,9 @@ export async function handleTelegramWebhook(
   if (!stored || stored.telegram_message_id === null) {
     return new Response("Ignored", { status: 200 });
   }
+  if (stored.telegram_message_id !== callback.messageId) {
+    return new Response("Forbidden", { status: 403 });
+  }
 
   const decision: DraftDecision = match[1] === "a" ? "approved" : "rejected";
   const status = stored.status === "pending"
@@ -83,7 +87,7 @@ export async function handleTelegramWebhook(
     );
   } catch (error) {
     providerFailed = true;
-    console.error(errorCategory(error));
+    logProviderError(errorCategory(error));
   }
   try {
     await telegram.editDraftState(
@@ -93,7 +97,7 @@ export async function handleTelegramWebhook(
     );
   } catch (error) {
     providerFailed = true;
-    console.error(errorCategory(error));
+    logProviderError(errorCategory(error));
   }
 
   return providerFailed
@@ -107,10 +111,14 @@ function parseCallbackQuery(value: unknown): CallbackQuery | null {
   }
   const message = isRecord(value.message) ? value.message : null;
   const chat = message && isRecord(message.chat) ? message.chat : null;
-  if (!chat || (typeof chat.id !== "number" && typeof chat.id !== "string")) {
+  if (
+    !chat ||
+    (typeof chat.id !== "number" && typeof chat.id !== "string") ||
+    typeof message?.message_id !== "number"
+  ) {
     return null;
   }
-  return { id: value.id, data: value.data, chatId: String(chat.id) };
+  return { id: value.id, data: value.data, chatId: String(chat.id), messageId: message.message_id };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -125,4 +133,8 @@ function errorCategory(error: unknown): string {
   if (!(error instanceof Error)) return "webhook_error";
   const category = error.message.split(":", 1)[0];
   return /^[a-z][a-z0-9_]{0,63}$/.test(category) ? category : "webhook_error";
+}
+
+function logProviderError(category: string): void {
+  console.error(JSON.stringify({ event: "webhook_provider_error", category }));
 }

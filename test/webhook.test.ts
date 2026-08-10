@@ -41,7 +41,7 @@ function workerEnv(): Env {
 
 function callbackRequest(
   draftId: number,
-  options: { secret?: string; chatId?: number; data?: string } = {},
+  options: { secret?: string; chatId?: number; data?: string; messageId?: number } = {},
 ): Request {
   return new Request("https://worker.test/telegram", {
     method: "POST",
@@ -54,7 +54,7 @@ function callbackRequest(
         id: "callback-7",
         data: options.data ?? `a:${draftId}`,
         message: {
-          message_id: 314,
+          message_id: options.messageId ?? 314,
           text: "A factual draft.",
           chat: { id: options.chatId ?? Number(CHAT_ID) },
         },
@@ -115,6 +115,22 @@ describe("Telegram webhook", () => {
 
     expect(response.status).toBe(403);
     expect(await draftStatus(draftId)).toBe("pending");
+  });
+
+  it("rejects a callback from a different Telegram message before state changes", async () => {
+    let externalCalls = 0;
+    const response = await handleTelegramWebhook(
+      callbackRequest(draftId, { messageId: 315 }),
+      workerEnv(),
+      async () => {
+        externalCalls += 1;
+        return Response.json({ ok: true, result: true });
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await draftStatus(draftId)).toBe("pending");
+    expect(externalCalls).toBe(0);
   });
 
   it("rejects malformed callback data before state changes", async () => {
@@ -218,7 +234,9 @@ describe("Telegram webhook", () => {
     expect(response.status).toBe(502);
     expect(await draftStatus(draftId)).toBe("approved");
     expect(calledMethods).toEqual(["answerCallbackQuery", "editMessageText"]);
-    expect(consoleError).toHaveBeenCalledWith("telegram_api_error");
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "webhook_provider_error", category: "telegram_api_error",
+    }));
   });
 
   it("returns 502 after an edit failure even when acknowledgement succeeds", async () => {
@@ -237,11 +255,23 @@ describe("Telegram webhook", () => {
     expect(response.status).toBe(502);
     expect(await draftStatus(draftId)).toBe("approved");
     expect(calledMethods).toEqual(["answerCallbackQuery", "editMessageText"]);
-    expect(consoleError).toHaveBeenCalledWith("telegram_api_error");
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "webhook_provider_error", category: "telegram_api_error",
+    }));
   });
 
   it("exposes a POST-only Worker fetch path", async () => {
     const response = await worker.fetch(new Request("https://worker.test/telegram"), workerEnv());
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("Not found");
+  });
+
+  it("does not route POST requests outside /telegram", async () => {
+    const response = await worker.fetch(
+      new Request("https://worker.test/not-telegram", { method: "POST" }),
+      workerEnv(),
+    );
 
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("Not found");

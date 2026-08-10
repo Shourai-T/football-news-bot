@@ -154,6 +154,66 @@ describe("scheduled pipeline", () => {
     ).toBe("2026-08-11");
   });
 
+  it("starts a separate five-request Gemini quota after Vietnam midnight", async () => {
+    let rssRequests = 0;
+    const requestedUrls: string[] = [];
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes("club.test/rss")) {
+        rssRequests += 1;
+        return new Response(rssDocument(`https://club.test/news/midnight-${rssRequests}`));
+      }
+      if (url.includes("generativelanguage.googleapis.com")) {
+        return Response.json({ candidates: [{ content: { parts: [{ text: "A factual draft." }] } }] });
+      }
+      return Response.json({ ok: true, result: { message_id: 400 + rssRequests } });
+    };
+
+    for (let index = 0; index < 5; index += 1) {
+      await runScheduledPipeline(workerEnv(), Date.parse("2026-08-10T12:00:00.000Z") + index * 60_000, fetcher);
+    }
+    await runScheduledPipeline(workerEnv(), Date.parse("2026-08-10T17:07:00.000Z"), fetcher);
+
+    expect(requestedUrls.filter((url) => url.includes("generativelanguage.googleapis.com"))).toHaveLength(6);
+    expect(await env.DB.prepare("SELECT gemini_requests FROM daily_usage WHERE local_date = ?").bind("2026-08-10").first<number>("gemini_requests")).toBe(5);
+    expect(await env.DB.prepare("SELECT gemini_requests FROM daily_usage WHERE local_date = ?").bind("2026-08-11").first<number>("gemini_requests")).toBe(1);
+  });
+
+  it("marks a run failed without creating a draft when Gemini fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetcher: typeof fetch = async (input) => {
+      if (String(input).includes("club.test/rss")) return new Response(rssDocument(seenArticle.canonicalUrl));
+      return new Response("provider error", { status: 500 });
+    };
+
+    await runScheduledPipeline(workerEnv(), SCHEDULED_TIME, fetcher);
+
+    expect(await env.DB.prepare("SELECT outcome, error_summary FROM scheduled_runs WHERE slot_key = ?").bind(SLOT_KEY).first())
+      .toMatchObject({ outcome: "failed", error_summary: "gemini_api_error" });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS total FROM drafts").first<number>("total")).toBe(0);
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "scheduled_run_failed",
+      slotKey: SLOT_KEY,
+      category: "gemini_api_error",
+    }));
+  });
+
+  it("marks a created draft failed when Telegram send fails", async () => {
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("club.test/rss")) return new Response(rssDocument(seenArticle.canonicalUrl));
+      if (url.includes("generativelanguage.googleapis.com")) return Response.json({ candidates: [{ content: { parts: [{ text: "A factual draft." }] } }] });
+      return new Response("provider error", { status: 500 });
+    };
+
+    await runScheduledPipeline(workerEnv(), SCHEDULED_TIME, fetcher);
+
+    expect(await env.DB.prepare("SELECT outcome, error_summary FROM scheduled_runs WHERE slot_key = ?").bind(SLOT_KEY).first())
+      .toMatchObject({ outcome: "failed", error_summary: "telegram_api_error" });
+    expect(await env.DB.prepare("SELECT status FROM drafts").first<string>("status")).toBe("failed");
+  });
+
   it("records a total RSS outage as failed and logs only a short category", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const fetcher: typeof fetch = async () => {
@@ -167,7 +227,9 @@ describe("scheduled pipeline", () => {
         .bind(SLOT_KEY)
         .first(),
     ).toMatchObject({ outcome: "failed", error_summary: "rss_unavailable" });
-    expect(consoleError).toHaveBeenCalledWith("rss_feed_error");
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "rss_feed_error", slotKey: SLOT_KEY, sourceCount: 1,
+    }));
     expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining("upstream details"));
   });
 
@@ -199,7 +261,9 @@ describe("scheduled pipeline", () => {
         .bind(SLOT_KEY)
         .first<string>("outcome"),
     ).toBe("draft_sent");
-    expect(consoleError).toHaveBeenCalledWith("rss_feed_error");
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "rss_feed_error", slotKey: SLOT_KEY, sourceCount: 2,
+    }));
   });
 
   it("categorizes a D1 failure while beginning a run", async () => {
@@ -215,7 +279,9 @@ describe("scheduled pipeline", () => {
         throw new Error("fetch must not be called");
       }),
     ).resolves.toBeUndefined();
-    expect(consoleError).toHaveBeenCalledWith("pipeline_error");
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "scheduled_run_failed", slotKey: SLOT_KEY, category: "pipeline_error",
+    }));
     expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining("connection details"));
   });
 
@@ -239,8 +305,8 @@ describe("scheduled pipeline", () => {
     );
 
     expect(consoleError.mock.calls).toEqual([
-      ["config_error"],
-      ["pipeline_cleanup_error"],
+      [JSON.stringify({ event: "scheduled_run_failed", slotKey: SLOT_KEY, category: "config_error" })],
+      [JSON.stringify({ event: "scheduled_run_cleanup_failed", slotKey: SLOT_KEY })],
     ]);
   });
 });

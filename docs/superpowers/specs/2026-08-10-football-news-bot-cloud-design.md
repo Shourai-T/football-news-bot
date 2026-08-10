@@ -110,9 +110,10 @@ D1 stores only operational metadata:
 - `daily_usage`: Asia/Ho_Chi_Minh calendar date and successful Gemini request
   count.
 
-Indexes support URL deduplication, daily quota lookup, pending-draft lookup,
-and historical cleanup. Old article and run records are pruned on a scheduled
-run; approval records are retained for auditability.
+Indexes support URL deduplication, daily quota lookup, and pending-draft lookup.
+Historical pruning is explicitly deferred for this MVP: approval records are
+retained for auditability, and a retention policy must be approved before any
+scheduled deletion is introduced.
 
 ## Configuration and secrets
 

@@ -42,7 +42,7 @@ export async function runScheduledPipeline(
       failedFeeds += 1;
     });
     if (failedFeeds > 0) {
-      console.error("rss_feed_error");
+      logEvent("rss_feed_error", { slotKey, sourceCount: feeds.length });
     }
     if (feeds.length > 0 && failedFeeds === feeds.length) {
       await completeRun(env.DB, slotKey, "failed", "rss_unavailable", scheduledAt);
@@ -64,7 +64,7 @@ export async function runScheduledPipeline(
 
     if (!(await reserveGeminiRequest(env.DB, slotKey, localDate))) {
       await completeRun(env.DB, slotKey, "failed", "daily_quota", scheduledAt);
-      console.error("daily_quota");
+      logEvent("scheduled_run_limited", { slotKey, category: "daily_quota" });
       return;
     }
 
@@ -91,7 +91,7 @@ export async function runScheduledPipeline(
     await completeRun(env.DB, slotKey, "draft_sent", null, scheduledAt);
   } catch (error) {
     const category = errorCategory(error);
-    console.error(category);
+    logEvent("scheduled_run_failed", { slotKey, category });
     if (!runStarted) {
       return;
     }
@@ -102,13 +102,13 @@ export async function runScheduledPipeline(
           .bind("failed", draftId, "pending")
           .run();
       } catch {
-        console.error("pipeline_cleanup_error");
+        logEvent("scheduled_run_cleanup_failed", { slotKey });
       }
     }
     try {
       await completeRun(env.DB, slotKey, "failed", category, scheduledAt);
     } catch {
-      console.error("pipeline_cleanup_error");
+      logEvent("scheduled_run_cleanup_failed", { slotKey });
     }
   }
 }
@@ -131,4 +131,8 @@ function errorCategory(error: unknown): string {
   if (error.message.startsWith("RSS_FEEDS_JSON")) return "config_error";
   const category = error.message.split(":", 1)[0];
   return /^[a-z][a-z0-9_]{0,63}$/.test(category) ? category : "pipeline_error";
+}
+
+function logEvent(event: string, fields: Record<string, string | number>): void {
+  console.error(JSON.stringify({ event, ...fields }));
 }

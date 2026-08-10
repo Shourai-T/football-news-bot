@@ -16,6 +16,38 @@ afterEach(() => {
 });
 
 describe("TelegramClient", () => {
+  it("keeps the initial Telegram draft within the text limit after its source suffix", async () => {
+    const bodies: Array<{ text: string }> = [];
+    const fetcher: typeof fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as { text: string });
+      return Response.json({ ok: true, result: { message_id: 314 } });
+    };
+    const telegram = new TelegramClient(
+      { botToken: "telegram-test-secret", chatId: "-100123" },
+      fetcher,
+    );
+
+    await telegram.sendDraft({ ...draft, body: "x".repeat(3_000), canonicalUrl: `https://club.test/${"a".repeat(2_000)}` });
+
+    expect(bodies[0]!.text.length).toBeLessThanOrEqual(4_096);
+  });
+
+  it("keeps the final Telegram edit within the text limit after its status suffix", async () => {
+    const bodies: Array<{ text: string }> = [];
+    const fetcher: typeof fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as { text: string });
+      return Response.json({ ok: true, result: true });
+    };
+    const telegram = new TelegramClient(
+      { botToken: "telegram-test-secret", chatId: "-100123" },
+      fetcher,
+    );
+
+    await telegram.editDraftState(314, `x`.repeat(4_096), "rejected");
+
+    expect(bodies[0]!.text.length).toBeLessThanOrEqual(4_096);
+  });
+
   it("sends a stored draft with compact approval callbacks", async () => {
     const bodies: unknown[] = [];
     const fetcher: typeof fetch = async (_input, init) => {

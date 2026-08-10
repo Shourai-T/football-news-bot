@@ -1,6 +1,9 @@
+import { MAX_DRAFT_BODY_LENGTH } from "./limits";
 import type { DraftStatus, TelegramConfig, TelegramDraft } from "./types";
 
 const REQUEST_TIMEOUT_MS = 8_000;
+const TELEGRAM_TEXT_LIMIT = 4_096;
+const SOURCE_PREFIX = "\n\nSource: ";
 
 interface TelegramResponse {
   ok?: unknown;
@@ -53,7 +56,7 @@ export class TelegramClient {
     await this.#request("editMessageText", {
       chat_id: this.config.chatId,
       message_id: telegramMessageId,
-      text: `${currentText}\n\nStatus: ${status.toUpperCase()}`,
+      text: truncate(currentText, TELEGRAM_TEXT_LIMIT - statusSuffix(status).length) + statusSuffix(status),
       reply_markup: { inline_keyboard: [] },
     });
   }
@@ -90,7 +93,17 @@ export class TelegramClient {
 }
 
 function formatDraft(draft: TelegramDraft): string {
-  return `${draft.body}\n\nSource: ${draft.canonicalUrl}`;
+  const body = truncate(draft.body, MAX_DRAFT_BODY_LENGTH);
+  const sourceLength = TELEGRAM_TEXT_LIMIT - body.length - SOURCE_PREFIX.length;
+  return `${body}${SOURCE_PREFIX}${truncate(draft.canonicalUrl, sourceLength)}`;
+}
+
+function statusSuffix(status: Exclude<DraftStatus, "pending">): string {
+  return `\n\nStatus: ${status.toUpperCase()}`;
+}
+
+function truncate(value: string, maximumLength: number): string {
+  return value.slice(0, Math.max(0, maximumLength));
 }
 
 function getMessageId(result: unknown): number | null {

@@ -1,6 +1,7 @@
 import type { Article } from "./types";
 
 const MAX_AGE_MS = 72 * 60 * 60 * 1000;
+const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 export function selectBestCandidate(
   entries: Article[],
@@ -12,7 +13,8 @@ export function selectBestCandidate(
     .filter(
       (entry) =>
         entry.topicScore > 0 &&
-        now.getTime() - entry.publishedAt.getTime() <= MAX_AGE_MS,
+        now.getTime() - entry.publishedAt.getTime() <= MAX_AGE_MS &&
+        entry.publishedAt.getTime() - now.getTime() <= MAX_FUTURE_CLOCK_SKEW_MS,
     )
     .sort(
       (a, b) =>

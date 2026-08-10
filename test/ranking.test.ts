@@ -54,9 +54,30 @@ describe("candidate ranking", () => {
     ).toBe("https://lower.test/messi");
   });
 
-  it("uses topic score and then publication time to break source-priority ties", () => {
+  it("rejects a high-scoring article published far in the future", () => {
+    const future = {
+      ...entries[0],
+      canonicalUrl: "https://bbc.test/future",
+      publishedAt: new Date("2026-08-11T12:00:00.000Z"),
+      sourcePriority: 100,
+      topicScore: 100,
+    };
+
+    expect(selectBestCandidate([...entries, future], new Set(), NOW)?.canonicalUrl)
+      .toBe("https://bbc.test/transfer");
+  });
+
+  it("uses topic score to break a source-priority tie", () => {
     const candidates: Article[] = [
       { ...entries[0], canonicalUrl: "https://a.test", sourcePriority: 5, topicScore: 1 },
+      { ...entries[0], canonicalUrl: "https://b.test", sourcePriority: 5, topicScore: 2 },
+    ];
+
+    expect(selectBestCandidate(candidates, new Set(), NOW)?.canonicalUrl).toBe("https://b.test");
+  });
+
+  it("uses publication time to break a topic-score tie", () => {
+    const candidates: Article[] = [
       { ...entries[0], canonicalUrl: "https://b.test", sourcePriority: 5, topicScore: 2, publishedAt: new Date("2026-08-10T10:00:00.000Z") },
       { ...entries[0], canonicalUrl: "https://c.test", sourcePriority: 5, topicScore: 2, publishedAt: new Date("2026-08-10T11:30:00.000Z") },
     ];

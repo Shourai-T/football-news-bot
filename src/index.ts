@@ -12,7 +12,7 @@ export default {
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method !== "POST") {
+    if (request.method !== "POST" || new URL(request.url).pathname !== "/telegram") {
       return new Response("Not found", { status: 404 });
     }
     return handleTelegramWebhook(request, env, fetch);

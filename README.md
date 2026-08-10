@@ -65,7 +65,7 @@ curl --request POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook
   --data '{"url":"https://<WORKER_HOST>/telegram","secret_token":"<TELEGRAM_WEBHOOK_SECRET>","allowed_updates":["callback_query"]}'
 ```
 
-The Worker accepts POST requests only. It verifies Telegram's secret header and the configured chat ID before changing a draft. Approval and rejection callbacks use compact `a:<draft-id>` and `r:<draft-id>` payloads.
+The Worker accepts `POST /telegram` only. It verifies Telegram's secret header, configured chat ID, and stored Telegram message ID before changing a draft. Approval and rejection callbacks use compact `a:<draft-id>` and `r:<draft-id>` payloads.
 
 ## Operations
 
@@ -76,6 +76,8 @@ npx wrangler tail
 ```
 
 The Cron expression in `wrangler.jsonc` runs at `01:07`, `04:07`, `07:07`, `10:07`, and `13:07` UTC, corresponding to `08:07`, `11:07`, `14:07`, `17:07`, and `20:07` in `Asia/Ho_Chi_Minh`. D1 prevents duplicate slots and URLs, and caps Gemini reservations at five per Vietnam calendar date.
+
+Historical D1 pruning is deferred in this MVP. Approval records remain intact; define and review a retention policy before adding deletion logic.
 
 To stop callbacks before retiring or replacing the Worker, remove the webhook:
 
