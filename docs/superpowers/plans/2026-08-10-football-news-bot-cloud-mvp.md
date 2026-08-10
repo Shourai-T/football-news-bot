@@ -119,7 +119,7 @@ CREATE TABLE drafts (
 CREATE INDEX drafts_status_idx ON drafts(status, created_at);
 ~~~
 
-Configure the D1 binding DB and exactly five UTC Cron slots. Ignore .dev.vars. The example file lists keys only.
+Configure the D1 binding DB, exactly five UTC Cron slots, and RSS_FEEDS_JSON under the versioned Worker vars section. Ignore .dev.vars. The example file lists secret keys only.
 
 - [ ] **Step 4: Verify scaffold**
 
@@ -320,7 +320,7 @@ export default {
 
 Derive slot key and daily quota key from scheduled time in Asia/Ho_Chi_Minh. Begin the run before RSS fetch and stop on an existing slot. Log a short error category only. Webhook handling verifies X-Telegram-Bot-Api-Secret-Token, accepts callback_query only, validates callback format a:id or r:id, verifies callback chat ID, transitions D1 atomically, then answers and edits the message.
 
-README documents npm install; Wrangler login; D1 creation; copying the database ID into wrangler.jsonc; remote migration; setting five secrets and RSS_FEEDS_JSON; deploy; setWebhook registration; wrangler tail; and webhook removal. It uses placeholders only and explicitly prohibits scraping club websites.
+README documents npm install; Wrangler login; D1 creation; copying the database ID into wrangler.jsonc; remote migration; setting five secrets; reviewing the versioned RSS_FEEDS_JSON variable; deploy; setWebhook registration; wrangler tail; and webhook removal. It uses placeholders only and explicitly prohibits scraping club websites.
 
 - [ ] **Step 4: Run final local verification**
 
