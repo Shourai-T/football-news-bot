@@ -53,4 +53,7 @@ focused Gemini, Telegram, ranking, pipeline, and webhook tests.
 
 ## Commit
 
-Implementation commit SHA: pending (recorded by the follow-up report commit).
+Implementation commit SHA: `35cebc9ba42aed2446c63286f0c979b3b8faeb8a`.
+
+Final command outputs (2026-08-11): `npm test` — 9 files and 61/61 tests
+passed; `npm run typecheck` — passed; `WRANGLER_LOG_PATH=/tmp/football-news-bot-final-review-wrangler.log npx wrangler deploy --dry-run` — bundle validation passed with no deployment; `git diff --check` — passed.
