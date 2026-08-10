@@ -26,4 +26,22 @@ export interface Article {
 
 export type DraftStatus = "pending" | "approved" | "rejected" | "failed";
 
+export type DraftDecision = Extract<DraftStatus, "approved" | "rejected">;
+
 export type RunOutcome = "running" | "no_candidate" | "draft_sent" | "failed";
+
+export interface GeminiConfig {
+  apiKey: string;
+  model: string;
+}
+
+export interface TelegramConfig {
+  botToken: string;
+  chatId: string;
+}
+
+export interface TelegramDraft {
+  id: number;
+  body: string;
+  canonicalUrl: string;
+}
