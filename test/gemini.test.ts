@@ -63,6 +63,14 @@ describe("generateDraft", () => {
     await expect(generateDraft(article, config, fetcher)).rejects.toThrow("gemini_empty_response");
   });
 
+  it("classifies a timeout while reading the response body", async () => {
+    const response = Response.json({});
+    vi.spyOn(response, "json").mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    const fetcher: typeof fetch = async () => response;
+
+    await expect(generateDraft(article, config, fetcher)).rejects.toThrow("gemini_timeout");
+  });
+
   it("maps Gemini API errors without exposing the provider body or secret", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const fetcher: typeof fetch = async () =>

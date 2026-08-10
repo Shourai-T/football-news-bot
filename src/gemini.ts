@@ -45,8 +45,8 @@ export async function generateDraft(
   let payload: GeminiResponse;
   try {
     payload = (await response.json()) as GeminiResponse;
-  } catch {
-    throw new Error("gemini_invalid_response");
+  } catch (error) {
+    throw new Error(isTimeout(error) ? "gemini_timeout" : "gemini_invalid_response");
   }
 
   const candidate = payload.candidates?.[0]?.content?.parts

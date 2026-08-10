@@ -1,5 +1,7 @@
 import type { Article, DraftDecision, DraftStatus, RunOutcome } from "./types";
 
+const MAX_QUERY_PARAMETERS = 100;
+
 export async function beginRun(
   db: D1Database,
   slotKey: string,
@@ -25,13 +27,20 @@ export async function getSeenUrls(
     return new Set();
   }
 
-  const placeholders = uniqueUrls.map(() => "?").join(", ");
-  const result = await db
-    .prepare(`SELECT canonical_url FROM articles WHERE canonical_url IN (${placeholders})`)
-    .bind(...uniqueUrls)
-    .all<{ canonical_url: string }>();
+  const seenUrls = new Set<string>();
+  for (let offset = 0; offset < uniqueUrls.length; offset += MAX_QUERY_PARAMETERS) {
+    const chunk = uniqueUrls.slice(offset, offset + MAX_QUERY_PARAMETERS);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = await db
+      .prepare(`SELECT canonical_url FROM articles WHERE canonical_url IN (${placeholders})`)
+      .bind(...chunk)
+      .all<{ canonical_url: string }>();
+    for (const row of result.results) {
+      seenUrls.add(row.canonical_url);
+    }
+  }
 
-  return new Set(result.results.map((row) => row.canonical_url));
+  return seenUrls;
 }
 
 export async function recordArticle(

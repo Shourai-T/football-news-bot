@@ -78,8 +78,8 @@ export class TelegramClient {
     let payload: TelegramResponse;
     try {
       payload = (await response.json()) as TelegramResponse;
-    } catch {
-      throw new Error("telegram_invalid_response");
+    } catch (error) {
+      throw new Error(isTimeout(error) ? "telegram_timeout" : "telegram_invalid_response");
     }
     if (payload.ok !== true) {
       throw new Error(`telegram_api_error:${response.status}`);

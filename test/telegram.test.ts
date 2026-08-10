@@ -97,6 +97,18 @@ describe("TelegramClient", () => {
     expect(consoleError).not.toHaveBeenCalled();
   });
 
+  it("classifies an abort while reading the response body", async () => {
+    const response = Response.json({});
+    vi.spyOn(response, "json").mockRejectedValue(new DOMException("aborted", "AbortError"));
+    const fetcher: typeof fetch = async () => response;
+    const telegram = new TelegramClient(
+      { botToken: "telegram-test-secret", chatId: "-100123" },
+      fetcher,
+    );
+
+    await expect(telegram.sendDraft(draft)).rejects.toThrow("telegram_timeout");
+  });
+
   it("uses an exact eight-second timeout for every provider call", async () => {
     const timeout = vi.mocked(AbortSignal.timeout);
     const fetcher: typeof fetch = async (input) =>

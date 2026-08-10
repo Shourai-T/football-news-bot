@@ -67,6 +67,17 @@ describe("repository", () => {
     expect(await env.DB.prepare("SELECT COUNT(*) AS total FROM articles").first<number>("total")).toBe(1);
   });
 
+  it("finds seen URLs when more than 100 bound candidates are supplied", async () => {
+    const canonicalUrls = Array.from(
+      { length: 101 },
+      (_, index) => `https://club.test/news/story-${index}`,
+    );
+    const storedUrl = canonicalUrls[100]!;
+    await recordArticle(env.DB, { ...article, canonicalUrl: storedUrl }, true);
+
+    await expect(getSeenUrls(env.DB, canonicalUrls)).resolves.toEqual(new Set([storedUrl]));
+  });
+
   it("rejects the sixth Gemini reservation in one Vietnam day", async () => {
     for (let index = 0; index < 5; index += 1) {
       const key = `slot-${index}`;
