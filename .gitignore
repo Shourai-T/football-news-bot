@@ -5,3 +5,7 @@
 node_modules/
 coverage/
 dist/
+supabase/functions/.env
+supabase/functions/.env.local
+supabase/.temp/
+.supabase/
