@@ -1,7 +1,7 @@
 # Apps Script Manual Redirect Design
 
 Date: 2026-08-12
-Status: approved concept, written design pending review
+Status: approved
 
 ## Problem
 
