@@ -383,11 +383,13 @@ describe("Telegram webhook", () => {
       status: "unavailable",
       category: "telegram_network_error",
       transport: "fetch_rejected",
+      phase: "relay_post",
     });
     expect(responseBody).not.toContain(secretLookingError);
     expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
       event: "telegram_health_failed",
       category: "telegram_network_error",
+      phase: "relay_post",
     }));
     expect(consoleError.mock.calls.flat().join("\n")).not.toContain(secretLookingError);
   });
@@ -411,10 +413,12 @@ describe("Telegram webhook", () => {
       status: "unavailable",
       category: "telegram_timeout",
       transport: "timeout",
+      phase: "relay_post",
     });
     expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
       event: "telegram_health_failed",
       category: "telegram_timeout",
+      phase: "relay_post",
     }));
   });
 

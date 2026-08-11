@@ -24,8 +24,11 @@ export async function handleTelegramHealth(
   } catch (error) {
     const category = errorCategory(error);
     const transport = error instanceof TelegramRequestError ? error.transport : "fetch_rejected";
-    console.error(JSON.stringify({ event: "telegram_health_failed", category }));
-    return Response.json({ status: "unavailable", category, transport }, { status: 502 });
+    const phase = error instanceof TelegramRequestError && error.phase !== undefined
+      ? { phase: error.phase }
+      : {};
+    console.error(JSON.stringify({ event: "telegram_health_failed", category, ...phase }));
+    return Response.json({ status: "unavailable", category, transport, ...phase }, { status: 502 });
   }
 }
 

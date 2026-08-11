@@ -178,6 +178,7 @@ describe("TelegramClient", () => {
     await expect(client(createFetcher()).checkHealth()).rejects.toMatchObject({
       message: "telegram_network_error",
       transport: "fetch_rejected",
+      phase: "relay_redirect",
     });
     await expect(client(createFetcher()).checkHealth()).rejects.not.toThrow("private transport detail");
   });
@@ -193,8 +194,55 @@ describe("TelegramClient", () => {
     await expect(client(fetcher).checkHealth()).rejects.toMatchObject({
       message: "telegram_timeout",
       transport: "timeout",
+      phase: "relay_redirect",
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("classifies and redacts an initial relay POST rejection", async () => {
+    const privateDetail = "private initial fetch detail";
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new TypeError(privateDetail));
+
+    await expect(client(fetcher).checkHealth()).rejects.toMatchObject({
+      message: "telegram_network_error",
+      transport: "fetch_rejected",
+      phase: "relay_post",
+    });
+    await expect(client(fetcher).checkHealth()).rejects.not.toThrow(privateDetail);
+  });
+
+  it("classifies an initial relay POST timeout", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(
+      new DOMException("request timed out", "TimeoutError"),
+    );
+
+    await expect(client(fetcher).checkHealth()).rejects.toMatchObject({
+      message: "telegram_timeout",
+      transport: "timeout",
+      phase: "relay_post",
+    });
+  });
+
+  it("does not classify an envelope construction error as relay_post", async () => {
+    const privateError = new Error("private envelope detail");
+    const fetcher = vi.fn<typeof fetch>();
+    const telegram = new TelegramClient({
+      relayUrl: RELAY_URL,
+      relaySecret: RELAY_SECRET,
+      get chatId(): string {
+        throw privateError;
+      },
+    }, fetcher);
+
+    let caught: unknown;
+    try {
+      await telegram.checkHealth();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(privateError);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("rejects a second redirect without making a third request", async () => {

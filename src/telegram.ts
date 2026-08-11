@@ -27,10 +27,13 @@ class TelegramRelayRedirectError extends Error {
   }
 }
 
+export type TelegramRequestPhase = "relay_post" | "relay_redirect";
+
 export class TelegramRequestError extends Error {
   constructor(
     message: "telegram_timeout" | "telegram_network_error",
     readonly transport: "timeout" | "fetch_rejected",
+    readonly phase?: TelegramRequestPhase,
   ) {
     super(message);
   }
@@ -93,31 +96,27 @@ export class TelegramClient {
 
   async #request(method: string, body: Record<string, unknown>): Promise<TelegramResponse> {
     let response: Response;
+    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const relayUrl = this.config.relayUrl;
+    const requestBody = JSON.stringify({
+      secret: this.config.relaySecret,
+      chatId: this.config.chatId,
+      method,
+      body,
+    });
+    const requestInit: RequestInit = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: requestBody,
+      redirect: "manual",
+      signal,
+    };
     try {
-      const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-      response = await this.fetcher(this.config.relayUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          secret: this.config.relaySecret,
-          chatId: this.config.chatId,
-          method,
-          body,
-        }),
-        redirect: "manual",
-        signal,
-      });
-      response = await followAppsScriptRedirect(response, this.fetcher, signal);
+      response = await this.fetcher(relayUrl, requestInit);
     } catch (error) {
-      if (error instanceof TelegramRelayRedirectError) {
-        throw error;
-      }
-      const timeout = isTimeout(error);
-      throw new TelegramRequestError(
-        timeout ? "telegram_timeout" : "telegram_network_error",
-        timeout ? "timeout" : "fetch_rejected",
-      );
+      throw toTelegramRequestError(error, "relay_post");
     }
+    response = await followAppsScriptRedirect(response, this.fetcher, signal);
 
     if (!response.ok) {
       throw new Error("telegram_relay_error");
@@ -176,11 +175,27 @@ async function followAppsScriptRedirect(
     throw new TelegramRelayRedirectError();
   }
 
-  return fetcher(location, {
-    method: "GET",
-    redirect: "error",
-    signal,
-  });
+  try {
+    return await fetcher(location, {
+      method: "GET",
+      redirect: "error",
+      signal,
+    });
+  } catch (error) {
+    throw toTelegramRequestError(error, "relay_redirect");
+  }
+}
+
+function toTelegramRequestError(
+  error: unknown,
+  phase: TelegramRequestPhase,
+): TelegramRequestError {
+  const timeout = isTimeout(error);
+  return new TelegramRequestError(
+    timeout ? "telegram_timeout" : "telegram_network_error",
+    timeout ? "timeout" : "fetch_rejected",
+    phase,
+  );
 }
 
 function isRedirectStatus(status: number): boolean {
