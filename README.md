@@ -27,7 +27,7 @@ The Worker never calls the Telegram Bot API directly. Outbound `getMe`, `sendMes
 Before configuring Cloudflare, verify the relay from a terminal. Substitute values locally; do not save the command with its substituted values or expose the response body:
 
 ```sh
-curl "<TELEGRAM_RELAY_URL>" \
+curl --location "<TELEGRAM_RELAY_URL>" \
   --header "content-type: application/json" \
   --data '{"secret":"<RELAY_SHARED_SECRET>","method":"getMe","body":{}}'
 ```
