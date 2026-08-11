@@ -55,6 +55,7 @@ function relayResponse(body: unknown, status = 200): Response {
 
 function relayEnvelope(init: RequestInit | undefined): {
   secret: string;
+  chatId: string;
   method: string;
   body: Record<string, unknown>;
 } {
@@ -185,6 +186,7 @@ describe("Telegram webhook", () => {
         input: RELAY_URL,
         envelope: {
           secret: RELAY_SECRET,
+          chatId: CHAT_ID,
           method: "answerCallbackQuery",
           body: { callback_query_id: "callback-7", text: "Approved" },
         },
@@ -193,6 +195,7 @@ describe("Telegram webhook", () => {
         input: RELAY_URL,
         envelope: {
           secret: RELAY_SECRET,
+          chatId: CHAT_ID,
           method: "editMessageText",
           body: {
             chat_id: CHAT_ID,
@@ -353,6 +356,7 @@ describe("Telegram webhook", () => {
     expect(String(fetcher.mock.calls[0]?.[0])).toBe(RELAY_URL);
     expect(relayEnvelope(fetcher.mock.calls[0]?.[1])).toEqual({
       secret: RELAY_SECRET,
+      chatId: CHAT_ID,
       method: "getMe",
       body: {},
     });

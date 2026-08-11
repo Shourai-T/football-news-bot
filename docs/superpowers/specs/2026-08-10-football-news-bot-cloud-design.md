@@ -1,5 +1,7 @@
 # Football News Bot — Cloud MVP Design
 
+> **Superseded Telegram secret guidance:** `TELEGRAM_BOT_TOKEN` is no longer a Cloudflare/Worker secret. Keep it only in Google Apps Script Script Properties and follow the current [Google Apps Script Telegram relay README](../../../README.md#google-apps-script-telegram-relay). Any conflicting token-placement guidance below is historical.
+
 ## Objective
 
 Run a zero-server football-news workflow in the cloud. At five fixed daily

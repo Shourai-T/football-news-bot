@@ -1,5 +1,7 @@
 # Football News Bot Cloud MVP Implementation Plan
 
+> **Superseded Telegram secret guidance:** `TELEGRAM_BOT_TOKEN` is no longer a Cloudflare/Worker secret. Keep it only in Google Apps Script Script Properties and follow the current [Google Apps Script Telegram relay README](../../../README.md#google-apps-script-telegram-relay). Any conflicting token-placement guidance below is historical.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **Goal:** Build and deploy a TypeScript Cloudflare Worker which creates no more than five English football-news Telegram drafts per Vietnam day from configured RSS feeds and lets the private configured chat approve or reject a draft.

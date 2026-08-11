@@ -24,6 +24,7 @@ function client(fetcher: typeof fetch, relayUrl = RELAY_URL): TelegramClient {
 
 function relayBody(init: RequestInit | undefined): {
   secret: string;
+  chatId: string;
   method: string;
   body: Record<string, unknown>;
 } {
@@ -98,6 +99,7 @@ describe("TelegramClient", () => {
     expect(String(calls[0]?.input)).not.toContain("sendMessage");
     expect(calls[0]?.envelope).toEqual({
       secret: RELAY_SECRET,
+      chatId: CHAT_ID,
       method: "sendMessage",
       body: {
         chat_id: CHAT_ID,
@@ -126,6 +128,7 @@ describe("TelegramClient", () => {
     expect(String(calls[0]?.input)).toBe(RELAY_URL);
     expect(calls[0]?.envelope).toEqual({
       secret: RELAY_SECRET,
+      chatId: CHAT_ID,
       method: "answerCallbackQuery",
       body: { callback_query_id: "callback-7", text: "Approved" },
     });

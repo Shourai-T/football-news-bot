@@ -23,13 +23,25 @@ function doPost(e) {
     !chatId ||
     !sharedSecret ||
     !isRecord(request) ||
-    request.secret !== sharedSecret ||
-    typeof request.method !== "string" ||
-    !ALLOWED_METHODS.has(request.method) ||
-    !isRecord(request.body) ||
-    ("chat_id" in request.body && String(request.body.chat_id) !== chatId)
+    request.secret !== sharedSecret
   ) {
     return jsonResponse({ ok: false });
+  }
+
+  if (typeof request.chatId !== "string" || request.chatId !== chatId) {
+    return jsonResponse({ ok: false, error: "invalid_chat" });
+  }
+
+  if (
+    typeof request.method !== "string" ||
+    !ALLOWED_METHODS.has(request.method) ||
+    !isRecord(request.body)
+  ) {
+    return jsonResponse({ ok: false });
+  }
+
+  if ("chat_id" in request.body && String(request.body.chat_id) !== chatId) {
+    return jsonResponse({ ok: false, error: "invalid_chat" });
   }
 
   let response;

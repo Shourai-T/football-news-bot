@@ -91,7 +91,12 @@ export class TelegramClient {
       response = await this.fetcher(this.config.relayUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ secret: this.config.relaySecret, method, body }),
+        body: JSON.stringify({
+          secret: this.config.relaySecret,
+          chatId: this.config.chatId,
+          method,
+          body,
+        }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (error) {

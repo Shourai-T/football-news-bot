@@ -24,21 +24,44 @@ The Worker never calls the Telegram Bot API directly. Outbound `getMe`, `sendMes
 2. In **Project Settings**, add these Script Properties with values known only to the operator: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `RELAY_SHARED_SECRET`. Use the same shared-secret value later for Cloudflare's `TELEGRAM_RELAY_SECRET`.
 3. Deploy it as a **Web app**. Set **Execute as** to **Me** and **Who has access** to **Anyone**, then copy the Web app URL. Create a new deployment after changing the source.
 
-Before configuring Cloudflare, verify the relay from a terminal. Enter the URL and shared secret only at the prompts so neither is placed in shell history; do not expose the response body:
+Before configuring Cloudflare, verify the relay from a terminal. Enter the URL, chat ID, and shared secret only at the prompts so none is placed in shell history. The encoder passes the secret and payload only through standard input, and the response parser never prints the Telegram response body:
 
 ```sh
 printf 'Relay URL: '
-read -r RELAY_URL
+IFS= read -r RELAY_URL
+printf 'Telegram chat ID: '
+IFS= read -r TELEGRAM_CHAT_ID
 printf 'Relay shared secret: '
-read -rs RELAY_SHARED_SECRET
+IFS= read -rs RELAY_SHARED_SECRET
 printf '\n'
-curl --location "$RELAY_URL" \
-  --header "content-type: application/json" \
-  --data "{\"secret\":\"$RELAY_SHARED_SECRET\",\"method\":\"getMe\",\"body\":{}}"
-unset RELAY_URL RELAY_SHARED_SECRET
+printf '%s\0%s\0' "$RELAY_SHARED_SECRET" "$TELEGRAM_CHAT_ID" \
+  | node -e '
+      const chunks = [];
+      process.stdin.on("data", (chunk) => chunks.push(chunk));
+      process.stdin.on("end", () => {
+        const [secret, chatId] = Buffer.concat(chunks).toString("utf8").split("\0");
+        process.stdout.write(JSON.stringify({ secret, chatId, method: "getMe", body: {} }));
+      });
+    ' \
+  | curl --silent --location "$RELAY_URL" \
+      --header "content-type: application/json" \
+      --data-binary @- \
+  | node -e '
+      const chunks = [];
+      process.stdin.on("data", (chunk) => chunks.push(chunk));
+      process.stdin.on("end", () => {
+        let succeeded = false;
+        try {
+          const response = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          succeeded = response.ok === true && response.status === 200;
+        } catch {}
+        process.stdout.write(succeeded ? "Relay getMe succeeded.\n" : "Relay getMe failed.\n");
+      });
+    '
+unset RELAY_URL TELEGRAM_CHAT_ID RELAY_SHARED_SECRET
 ```
 
-The successful envelope has `ok: true`, status `200`, and a serialized Telegram response body. The relay accepts only the four outbound methods listed above and rejects a request whose `chat_id` is not the configured chat.
+The relay accepts only the four outbound methods listed above. Every request must carry the configured chat ID in the top-level relay envelope, and a Telegram body `chat_id`, when present, must match it.
 
 ## Cloudflare setup and deployment
 
