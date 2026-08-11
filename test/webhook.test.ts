@@ -17,6 +17,7 @@ declare global {
 
 const CHAT_ID = "-100123";
 const WEBHOOK_SECRET = "webhook-test-secret";
+const DIAGNOSTIC_SECRET = "diagnostic-test-secret";
 const article: Article = {
   title: "Club agrees transfer",
   excerpt: "The transfer was confirmed by the club.",
@@ -33,6 +34,7 @@ function workerEnv(): Env {
     TELEGRAM_BOT_TOKEN: "telegram-test-token",
     TELEGRAM_CHAT_ID: CHAT_ID,
     TELEGRAM_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    DIAGNOSTIC_SECRET,
     GEMINI_API_KEY: "gemini-test-key",
     GEMINI_MODEL: "gemini-test-model",
     RSS_FEEDS_JSON: "[]",
@@ -275,5 +277,34 @@ describe("Telegram webhook", () => {
 
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("Not found");
+  });
+
+  it("rejects a Telegram health probe without its separate diagnostic secret", async () => {
+    const response = await worker.fetch(
+      new Request("https://worker.test/internal/telegram-health", { method: "POST" }),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("probes Telegram from the Worker without returning bot details", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ ok: true, result: { id: 8702486864, username: "private" } }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await worker.fetch(
+      new Request("https://worker.test/internal/telegram-health", {
+        method: "POST",
+        headers: { "X-Diagnostic-Secret": DIAGNOSTIC_SECRET },
+      }),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "ok" });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe("https://api.telegram.org/bottelegram-test-token/getMe");
   });
 });

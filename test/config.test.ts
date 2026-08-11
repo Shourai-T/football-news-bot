@@ -66,6 +66,7 @@ describe("deployment feed configuration", () => {
       "TELEGRAM_BOT_TOKEN",
       "TELEGRAM_CHAT_ID",
       "TELEGRAM_WEBHOOK_SECRET",
+      "DIAGNOSTIC_SECRET",
       "GEMINI_API_KEY",
       "GEMINI_MODEL",
     ]) {

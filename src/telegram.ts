@@ -48,6 +48,10 @@ export class TelegramClient {
     });
   }
 
+  async checkHealth(): Promise<void> {
+    await this.#request("getMe", {});
+  }
+
   async editDraftState(
     telegramMessageId: number,
     currentText: string,

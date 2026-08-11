@@ -34,6 +34,7 @@ function workerEnv(overrides: Partial<Env> = {}): Env {
     TELEGRAM_BOT_TOKEN: "telegram-test-token",
     TELEGRAM_CHAT_ID: CHAT_ID,
     TELEGRAM_WEBHOOK_SECRET: "webhook-test-secret",
+    DIAGNOSTIC_SECRET: "diagnostic-test-secret",
     GEMINI_API_KEY: "gemini-test-key",
     GEMINI_MODEL: "gemini-test-model",
     RSS_FEEDS_JSON: JSON.stringify([
