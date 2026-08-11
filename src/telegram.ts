@@ -34,7 +34,11 @@ export class TelegramClient {
   constructor(
     private readonly config: TelegramConfig,
     private readonly fetcher: typeof fetch,
-  ) {}
+  ) {
+    if (isTelegramApiUrl(config.relayUrl)) {
+      throw new Error("telegram_relay_configuration_error");
+    }
+  }
 
   async sendDraft(draft: TelegramDraft): Promise<number> {
     const payload = await this.#request("sendMessage", {
@@ -178,6 +182,15 @@ function isTelegramResponse(value: unknown): value is TelegramResponse & { ok: b
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isTelegramApiUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "api.telegram.org";
+  } catch {
+    return false;
+  }
 }
 
 function isTimeout(error: unknown): boolean {

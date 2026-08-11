@@ -18,8 +18,8 @@ function relayResponse(body: unknown, status = 200): Response {
   });
 }
 
-function client(fetcher: typeof fetch): TelegramClient {
-  return new TelegramClient({ relayUrl: RELAY_URL, relaySecret: RELAY_SECRET, chatId: CHAT_ID }, fetcher);
+function client(fetcher: typeof fetch, relayUrl = RELAY_URL): TelegramClient {
+  return new TelegramClient({ relayUrl, relaySecret: RELAY_SECRET, chatId: CHAT_ID }, fetcher);
 }
 
 function relayBody(init: RequestInit | undefined): {
@@ -39,6 +39,21 @@ afterEach(() => {
 });
 
 describe("TelegramClient", () => {
+  it("rejects Telegram relay URLs before any request", () => {
+    const fetcher = vi.fn<typeof fetch>();
+
+    for (const relayUrl of [
+      "https://api.telegram.org",
+      "https://api.telegram.org/bot/token/sendMessage",
+      "https://api.telegram.org/?method=getMe",
+    ]) {
+      expect(() => client(fetcher, relayUrl)).toThrow("telegram_relay_configuration_error");
+      expect(() => client(fetcher, relayUrl)).not.toThrow(relayUrl);
+    }
+
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("keeps the initial Telegram draft within the text limit after its source suffix", async () => {
     const bodies: Array<{ text: string }> = [];
     const fetcher: typeof fetch = async (_input, init) => {
