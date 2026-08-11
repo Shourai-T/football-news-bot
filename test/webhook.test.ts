@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { handleTelegramHealth } from "../src/diagnostic";
 import worker from "../src/index";
 import { createDraft, recordArticle, setDraftTelegramMessage } from "../src/repository";
 import type { Article, Env } from "../src/types";
@@ -378,5 +379,64 @@ describe("Telegram webhook", () => {
       event: "telegram_health_failed",
       category: "telegram_timeout",
     }));
+  });
+
+  it("classifies a Telegram health response timeout as a timeout", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const providerResponse = Response.json({ ok: true });
+    vi.spyOn(providerResponse, "json").mockRejectedValue(new DOMException("request aborted", "AbortError"));
+    vi.stubGlobal("fetch", async () => providerResponse);
+
+    const response = await worker.fetch(
+      new Request("https://worker.test/internal/telegram-health", {
+        method: "POST",
+        headers: { "X-Diagnostic-Secret": DIAGNOSTIC_SECRET },
+      }),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      status: "unavailable",
+      category: "telegram_timeout",
+      transport: "timeout",
+    });
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "telegram_health_failed",
+      category: "telegram_timeout",
+    }));
+  });
+
+  it("redacts an arbitrary Telegram health handler error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const secretLookingError = "telegram_bot_token_secret";
+    const fetcher: typeof fetch = async () => ({
+      get ok() {
+        throw new Error(secretLookingError);
+      },
+    }) as unknown as Response;
+
+    const response = await handleTelegramHealth(
+      new Request("https://worker.test/internal/telegram-health", {
+        method: "POST",
+        headers: { "X-Diagnostic-Secret": DIAGNOSTIC_SECRET },
+      }),
+      workerEnv(),
+      fetcher,
+    );
+
+    expect(response.status).toBe(502);
+    const responseBody = await response.text();
+    expect(JSON.parse(responseBody)).toEqual({
+      status: "unavailable",
+      category: "diagnostic_error",
+      transport: "fetch_rejected",
+    });
+    expect(responseBody).not.toContain(secretLookingError);
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "telegram_health_failed",
+      category: "diagnostic_error",
+    }));
+    expect(consoleError.mock.calls.flat().join("\n")).not.toContain(secretLookingError);
   });
 });

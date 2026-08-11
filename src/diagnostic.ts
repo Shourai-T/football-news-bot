@@ -26,7 +26,5 @@ export async function handleTelegramHealth(
 }
 
 function errorCategory(error: unknown): string {
-  if (!(error instanceof Error)) return "diagnostic_error";
-  const category = error.message.split(":", 1)[0];
-  return /^[a-z][a-z0-9_]{0,63}$/.test(category) ? category : "diagnostic_error";
+  return error instanceof TelegramRequestError ? error.message : "diagnostic_error";
 }
