@@ -75,7 +75,11 @@ export async function handleTelegramWebhook(
   }
 
   const telegram = new TelegramClient(
-    { botToken: env.TELEGRAM_BOT_TOKEN, chatId: env.TELEGRAM_CHAT_ID },
+    {
+      relayUrl: env.TELEGRAM_RELAY_URL,
+      relaySecret: env.TELEGRAM_RELAY_SECRET,
+      chatId: env.TELEGRAM_CHAT_ID,
+    },
     fetcher,
   );
   const changed = stored.status === "pending" && status === decision;

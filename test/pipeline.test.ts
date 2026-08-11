@@ -17,6 +17,8 @@ declare global {
 const SCHEDULED_TIME = Date.parse("2026-08-10T01:07:00.000Z");
 const SLOT_KEY = "2026-08-10T01:07Z";
 const CHAT_ID = "-100123";
+const RELAY_URL = "https://relay.test/telegram";
+const RELAY_SECRET = "relay-test-secret";
 
 const seenArticle: Article = {
   title: "Ronaldo transfer update",
@@ -31,7 +33,8 @@ const seenArticle: Article = {
 function workerEnv(overrides: Partial<Env> = {}): Env {
   return {
     DB: env.DB,
-    TELEGRAM_BOT_TOKEN: "telegram-test-token",
+    TELEGRAM_RELAY_URL: RELAY_URL,
+    TELEGRAM_RELAY_SECRET: RELAY_SECRET,
     TELEGRAM_CHAT_ID: CHAT_ID,
     TELEGRAM_WEBHOOK_SECRET: "webhook-test-secret",
     DIAGNOSTIC_SECRET: "diagnostic-test-secret",
@@ -42,6 +45,14 @@ function workerEnv(overrides: Partial<Env> = {}): Env {
     ]),
     ...overrides,
   };
+}
+
+function relayResponse(body: unknown, status = 200): Response {
+  return Response.json({
+    ok: status >= 200 && status < 300,
+    status,
+    body: JSON.stringify(body),
+  });
 }
 
 function rssDocument(url: string): string {
@@ -103,7 +114,7 @@ describe("scheduled pipeline", () => {
       if (url.includes("generativelanguage.googleapis.com")) {
         return Response.json({ candidates: [{ content: { parts: [{ text: "A factual draft." }] } }] });
       }
-      return Response.json({ ok: true, result: { message_id: 314 } });
+      return relayResponse({ ok: true, result: { message_id: 314 } });
     };
 
     await runScheduledPipeline(workerEnv(), SCHEDULED_TIME, fetcher);
@@ -126,7 +137,7 @@ describe("scheduled pipeline", () => {
       if (url.includes("generativelanguage.googleapis.com")) {
         return Response.json({ candidates: [{ content: { parts: [{ text: "A factual draft." }] } }] });
       }
-      return Response.json({ ok: true, result: { message_id: 300 + rssRequests } });
+      return relayResponse({ ok: true, result: { message_id: 300 + rssRequests } });
     };
 
     for (let index = 0; index < 6; index += 1) {
@@ -168,7 +179,7 @@ describe("scheduled pipeline", () => {
       if (url.includes("generativelanguage.googleapis.com")) {
         return Response.json({ candidates: [{ content: { parts: [{ text: "A factual draft." }] } }] });
       }
-      return Response.json({ ok: true, result: { message_id: 400 + rssRequests } });
+      return relayResponse({ ok: true, result: { message_id: 400 + rssRequests } });
     };
 
     for (let index = 0; index < 5; index += 1) {
@@ -205,7 +216,7 @@ describe("scheduled pipeline", () => {
       const url = String(input);
       if (url.includes("club.test/rss")) return new Response(rssDocument(seenArticle.canonicalUrl));
       if (url.includes("generativelanguage.googleapis.com")) return Response.json({ candidates: [{ content: { parts: [{ text: "A factual draft." }] } }] });
-      return new Response("provider error", { status: 500 });
+      return relayResponse({ ok: false }, 500);
     };
 
     await runScheduledPipeline(workerEnv(), SCHEDULED_TIME, fetcher);
@@ -243,7 +254,7 @@ describe("scheduled pipeline", () => {
       if (url.includes("generativelanguage.googleapis.com")) {
         return Response.json({ candidates: [{ content: { parts: [{ text: "A factual draft." }] } }] });
       }
-      return Response.json({ ok: true, result: { message_id: 314 } });
+      return relayResponse({ ok: true, result: { message_id: 314 } });
     };
 
     await runScheduledPipeline(

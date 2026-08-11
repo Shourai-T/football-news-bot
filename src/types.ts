@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
-  TELEGRAM_BOT_TOKEN: string;
+  TELEGRAM_RELAY_URL: string;
+  TELEGRAM_RELAY_SECRET: string;
   TELEGRAM_CHAT_ID: string;
   TELEGRAM_WEBHOOK_SECRET: string;
   DIAGNOSTIC_SECRET: string;
@@ -37,7 +38,8 @@ export interface GeminiConfig {
 }
 
 export interface TelegramConfig {
-  botToken: string;
+  relayUrl: string;
+  relaySecret: string;
   chatId: string;
 }
 

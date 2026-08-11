@@ -3,6 +3,8 @@ import { parseFeeds } from "../src/config";
 // Vite loads the deployed Wrangler configuration as text for behavioral validation.
 // @ts-expect-error The raw-import query is provided by Vite at test runtime.
 import wranglerConfigText from "../wrangler.jsonc?raw";
+// @ts-expect-error The raw-import query is provided by Vite at test runtime.
+import devVarsExampleText from "../.dev.vars.example?raw";
 
 describe("deployment feed configuration", () => {
   it("rejects non-HTTPS and incomplete feed definitions", () => {
@@ -22,6 +24,17 @@ describe("deployment feed configuration", () => {
       { name: "Official club", url: "https://club.test/rss", priority: 20 },
       { name: "League", url: "https://league.test/atom", priority: 10 },
     ]);
+  });
+
+  it("keeps relay bindings and excludes the bot token from the local Worker secret template", () => {
+    const names = devVarsExampleText
+      .split("\n")
+      .filter((line: string) => !line.startsWith("#") && line.includes("="))
+      .map((line: string) => line.split("=", 1)[0]);
+
+    expect(names).toContain("TELEGRAM_RELAY_URL");
+    expect(names).toContain("TELEGRAM_RELAY_SECRET");
+    expect(names).not.toContain("TELEGRAM_BOT_TOKEN");
   });
 
   it("deploys the exact D1 binding, five Cron hours, and public feed set", () => {
@@ -63,7 +76,8 @@ describe("deployment feed configuration", () => {
     ]);
     expect(Object.keys(config.vars)).toEqual(["RSS_FEEDS_JSON"]);
     for (const secretName of [
-      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_RELAY_URL",
+      "TELEGRAM_RELAY_SECRET",
       "TELEGRAM_CHAT_ID",
       "TELEGRAM_WEBHOOK_SECRET",
       "DIAGNOSTIC_SECRET",

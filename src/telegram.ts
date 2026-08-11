@@ -10,6 +10,17 @@ interface TelegramResponse {
   result?: unknown;
 }
 
+interface RelayResponse {
+  ok: boolean;
+  status?: number;
+  body?: string;
+}
+
+interface RelayResponseWithBody extends RelayResponse {
+  status: number;
+  body: string;
+}
+
 export class TelegramRequestError extends Error {
   constructor(
     message: "telegram_timeout" | "telegram_network_error",
@@ -20,14 +31,10 @@ export class TelegramRequestError extends Error {
 }
 
 export class TelegramClient {
-  readonly #baseUrl: string;
-
   constructor(
     private readonly config: TelegramConfig,
     private readonly fetcher: typeof fetch,
-  ) {
-    this.#baseUrl = `https://api.telegram.org/bot${config.botToken}`;
-  }
+  ) {}
 
   async sendDraft(draft: TelegramDraft): Promise<number> {
     const payload = await this.#request("sendMessage", {
@@ -77,10 +84,10 @@ export class TelegramClient {
   async #request(method: string, body: Record<string, unknown>): Promise<TelegramResponse> {
     let response: Response;
     try {
-      response = await this.fetcher(`${this.#baseUrl}/${method}`, {
+      response = await this.fetcher(this.config.relayUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ secret: this.config.relaySecret, method, body }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (error) {
@@ -92,20 +99,39 @@ export class TelegramClient {
     }
 
     if (!response.ok) {
-      throw new Error(`telegram_api_error:${response.status}`);
+      throw new Error("telegram_relay_error");
     }
 
-    let payload: TelegramResponse;
+    let relayPayload: unknown;
     try {
-      payload = (await response.json()) as TelegramResponse;
+      relayPayload = (await response.json()) as RelayResponse;
     } catch (error) {
       if (isTimeout(error)) {
         throw new TelegramRequestError("telegram_timeout", "timeout");
       }
       throw new Error("telegram_invalid_response");
     }
+    if (!isRelayResponse(relayPayload)) {
+      throw new Error("telegram_invalid_response");
+    }
+    if (!hasRelayResponseBody(relayPayload)) {
+      throw new Error(relayPayload.ok ? "telegram_invalid_response" : "telegram_relay_error");
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(relayPayload.body);
+    } catch {
+      throw new Error(relayPayload.ok ? "telegram_invalid_response" : "telegram_relay_error");
+    }
+    if (!isTelegramResponse(payload)) {
+      throw new Error(relayPayload.ok ? "telegram_invalid_response" : "telegram_relay_error");
+    }
+    if (relayPayload.ok !== true) {
+      throw new Error(payload.ok === false ? `telegram_api_error:${relayPayload.status}` : "telegram_relay_error");
+    }
     if (payload.ok !== true) {
-      throw new Error(`telegram_api_error:${response.status}`);
+      throw new Error(`telegram_api_error:${relayPayload.status}`);
     }
 
     return payload;
@@ -133,6 +159,25 @@ function getMessageId(result: unknown): number | null {
 
   const messageId = result.message_id;
   return typeof messageId === "number" && Number.isInteger(messageId) ? messageId : null;
+}
+
+function isRelayResponse(value: unknown): value is RelayResponse {
+  return isRecord(value) &&
+    typeof value.ok === "boolean" &&
+    (value.status === undefined || (typeof value.status === "number" && Number.isInteger(value.status))) &&
+    (value.body === undefined || typeof value.body === "string");
+}
+
+function hasRelayResponseBody(value: RelayResponse): value is RelayResponseWithBody {
+  return typeof value.status === "number" && typeof value.body === "string";
+}
+
+function isTelegramResponse(value: unknown): value is TelegramResponse & { ok: boolean } {
+  return isRecord(value) && typeof value.ok === "boolean";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function isTimeout(error: unknown): boolean {

@@ -1,11 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TelegramClient } from "../src/telegram";
 
+const RELAY_URL = "https://relay.test/telegram";
+const RELAY_SECRET = "relay-test-secret";
+const CHAT_ID = "-100123";
 const draft = {
   id: 42,
   body: "Club confirms the transfer.",
   canonicalUrl: "https://club.test/news/transfer",
 };
+
+function relayResponse(body: unknown, status = 200): Response {
+  return Response.json({
+    ok: status >= 200 && status < 300,
+    status,
+    body: JSON.stringify(body),
+  });
+}
+
+function client(fetcher: typeof fetch): TelegramClient {
+  return new TelegramClient({ relayUrl: RELAY_URL, relaySecret: RELAY_SECRET, chatId: CHAT_ID }, fetcher);
+}
+
+function relayBody(init: RequestInit | undefined): {
+  secret: string;
+  method: string;
+  body: Record<string, unknown>;
+} {
+  return JSON.parse(String(init?.body));
+}
 
 beforeEach(() => {
   vi.spyOn(AbortSignal, "timeout").mockReturnValue(new AbortController().signal);
@@ -19,15 +42,15 @@ describe("TelegramClient", () => {
   it("keeps the initial Telegram draft within the text limit after its source suffix", async () => {
     const bodies: Array<{ text: string }> = [];
     const fetcher: typeof fetch = async (_input, init) => {
-      bodies.push(JSON.parse(String(init?.body)) as { text: string });
-      return Response.json({ ok: true, result: { message_id: 314 } });
+      bodies.push(relayBody(init).body as { text: string });
+      return relayResponse({ ok: true, result: { message_id: 314 } });
     };
-    const telegram = new TelegramClient(
-      { botToken: "telegram-test-secret", chatId: "-100123" },
-      fetcher,
-    );
 
-    await telegram.sendDraft({ ...draft, body: "x".repeat(3_000), canonicalUrl: `https://club.test/${"a".repeat(2_000)}` });
+    await client(fetcher).sendDraft({
+      ...draft,
+      body: "x".repeat(3_000),
+      canonicalUrl: `https://club.test/${"a".repeat(2_000)}`,
+    });
 
     expect(bodies[0]!.text.length).toBeLessThanOrEqual(4_096);
   });
@@ -35,124 +58,116 @@ describe("TelegramClient", () => {
   it("keeps the final Telegram edit within the text limit after its status suffix", async () => {
     const bodies: Array<{ text: string }> = [];
     const fetcher: typeof fetch = async (_input, init) => {
-      bodies.push(JSON.parse(String(init?.body)) as { text: string });
-      return Response.json({ ok: true, result: true });
+      bodies.push(relayBody(init).body as { text: string });
+      return relayResponse({ ok: true, result: true });
     };
-    const telegram = new TelegramClient(
-      { botToken: "telegram-test-secret", chatId: "-100123" },
-      fetcher,
-    );
 
-    await telegram.editDraftState(314, `x`.repeat(4_096), "rejected");
+    await client(fetcher).editDraftState(314, "x".repeat(4_096), "rejected");
 
     expect(bodies[0]!.text.length).toBeLessThanOrEqual(4_096);
   });
 
-  it("sends a stored draft with compact approval callbacks", async () => {
-    const bodies: unknown[] = [];
-    const fetcher: typeof fetch = async (_input, init) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      return Response.json({ ok: true, result: { message_id: 314 } });
+  it("posts a stored draft to the relay with a signed sendMessage envelope", async () => {
+    const calls: Array<{ input: RequestInfo | URL; envelope: ReturnType<typeof relayBody> }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      calls.push({ input, envelope: relayBody(init) });
+      return relayResponse({ ok: true, result: { message_id: 314 } });
     };
-    const telegram = new TelegramClient(
-      { botToken: "telegram-test-secret", chatId: "-100123" },
-      fetcher,
-    );
 
-    await expect(telegram.sendDraft(draft)).resolves.toBe(314);
-    expect(bodies[0]).toMatchObject({
-      chat_id: "-100123",
-      text: `${draft.body}\n\nSource: ${draft.canonicalUrl}`,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "Approve", callback_data: "a:42" },
-            { text: "Reject", callback_data: "r:42" },
+    await expect(client(fetcher).sendDraft(draft)).resolves.toBe(314);
+
+    expect(String(calls[0]?.input)).toBe(RELAY_URL);
+    expect(String(calls[0]?.input)).not.toContain(RELAY_SECRET);
+    expect(String(calls[0]?.input)).not.toContain("sendMessage");
+    expect(calls[0]?.envelope).toEqual({
+      secret: RELAY_SECRET,
+      method: "sendMessage",
+      body: {
+        chat_id: CHAT_ID,
+        text: `${draft.body}\n\nSource: ${draft.canonicalUrl}`,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "Approve", callback_data: "a:42" },
+              { text: "Reject", callback_data: "r:42" },
+            ],
           ],
-        ],
+        },
       },
     });
   });
 
-  it("acknowledges a callback through answerCallbackQuery", async () => {
-    const calls: Array<{ input: RequestInfo | URL; body: unknown }> = [];
+  it("acknowledges a callback through a relay answerCallbackQuery envelope", async () => {
+    const calls: Array<{ input: RequestInfo | URL; envelope: ReturnType<typeof relayBody> }> = [];
     const fetcher: typeof fetch = async (input, init) => {
-      calls.push({ input, body: JSON.parse(String(init?.body)) });
-      return Response.json({ ok: true, result: true });
+      calls.push({ input, envelope: relayBody(init) });
+      return relayResponse({ ok: true, result: true });
     };
-    const telegram = new TelegramClient(
-      { botToken: "telegram-test-secret", chatId: "-100123" },
-      fetcher,
-    );
 
-    await telegram.answerCallback("callback-7", "Approved");
+    await client(fetcher).answerCallback("callback-7", "Approved");
 
-    expect(String(calls[0]?.input).endsWith("/answerCallbackQuery")).toBe(true);
-    expect(calls[0]?.body).toEqual({ callback_query_id: "callback-7", text: "Approved" });
+    expect(String(calls[0]?.input)).toBe(RELAY_URL);
+    expect(calls[0]?.envelope).toEqual({
+      secret: RELAY_SECRET,
+      method: "answerCallbackQuery",
+      body: { callback_query_id: "callback-7", text: "Approved" },
+    });
   });
 
   it("edits a draft to its final state and removes buttons", async () => {
     const bodies: unknown[] = [];
     const fetcher: typeof fetch = async (_input, init) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      return Response.json({ ok: true, result: { message_id: 314 } });
+      bodies.push(relayBody(init).body);
+      return relayResponse({ ok: true, result: true });
     };
-    const telegram = new TelegramClient(
-      { botToken: "telegram-test-secret", chatId: "-100123" },
-      fetcher,
-    );
 
-    await telegram.editDraftState(314, `${draft.body}\n\nSource: ${draft.canonicalUrl}`, "approved");
+    await client(fetcher).editDraftState(314, `${draft.body}\n\nSource: ${draft.canonicalUrl}`, "approved");
 
     expect(bodies[0]).toEqual({
-      chat_id: "-100123",
+      chat_id: CHAT_ID,
       message_id: 314,
       text: `${draft.body}\n\nSource: ${draft.canonicalUrl}\n\nStatus: APPROVED`,
       reply_markup: { inline_keyboard: [] },
     });
   });
 
-  it("maps Telegram API errors without exposing provider data or secrets", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const fetcher: typeof fetch = async () =>
-      Response.json(
-        { ok: false, description: "provider payload must stay private" },
-        { status: 400 },
-      );
-    const telegram = new TelegramClient(
-      { botToken: "telegram-test-secret", chatId: "-100123" },
-      fetcher,
-    );
+  it("rejects a malformed relay envelope without exposing its body", async () => {
+    const privateRelayBody = "relay response must stay private";
+    const fetcher: typeof fetch = async () => Response.json({ ok: true, status: "200", body: privateRelayBody });
 
-    await expect(telegram.sendDraft(draft)).rejects.toThrow("telegram_api_error:400");
-    await expect(telegram.sendDraft(draft)).rejects.not.toThrow("provider payload must stay private");
-    expect(consoleError).not.toHaveBeenCalled();
+    await expect(client(fetcher).sendDraft(draft)).rejects.toThrow("telegram_invalid_response");
+    await expect(client(fetcher).sendDraft(draft)).rejects.not.toThrow(privateRelayBody);
   });
 
-  it("classifies an abort while reading the response body", async () => {
+  it("rejects a relay denial without requiring provider response fields", async () => {
+    const fetcher: typeof fetch = async () => Response.json({ ok: false });
+
+    await expect(client(fetcher).sendDraft(draft)).rejects.toThrow("telegram_relay_error");
+  });
+
+  it("preserves a nested Telegram HTTP 400 without exposing its response body", async () => {
+    const privateProviderBody = "provider payload must stay private";
+    const fetcher: typeof fetch = async () => relayResponse({ ok: false, description: privateProviderBody }, 400);
+
+    await expect(client(fetcher).sendDraft(draft)).rejects.toThrow("telegram_api_error:400");
+    await expect(client(fetcher).sendDraft(draft)).rejects.not.toThrow(privateProviderBody);
+  });
+
+  it("classifies an abort while reading the relay response body", async () => {
     const response = Response.json({});
     vi.spyOn(response, "json").mockRejectedValue(new DOMException("aborted", "AbortError"));
     const fetcher: typeof fetch = async () => response;
-    const telegram = new TelegramClient(
-      { botToken: "telegram-test-secret", chatId: "-100123" },
-      fetcher,
-    );
 
-    await expect(telegram.sendDraft(draft)).rejects.toThrow("telegram_timeout");
+    await expect(client(fetcher).sendDraft(draft)).rejects.toThrow("telegram_timeout");
   });
 
-  it("uses an exact eight-second timeout for every provider call", async () => {
+  it("uses an exact eight-second timeout for every relay call", async () => {
     const timeout = vi.mocked(AbortSignal.timeout);
-    const fetcher: typeof fetch = async (input) =>
-      Response.json(
-        String(input).endsWith("/sendMessage")
-          ? { ok: true, result: { message_id: 314 } }
-          : { ok: true, result: true },
-      );
-    const telegram = new TelegramClient(
-      { botToken: "telegram-test-secret", chatId: "-100123" },
-      fetcher,
-    );
+    const fetcher: typeof fetch = async (_input, init) => {
+      const { method } = relayBody(init);
+      return relayResponse(method === "sendMessage" ? { ok: true, result: { message_id: 314 } } : { ok: true, result: true });
+    };
+    const telegram = client(fetcher);
 
     await telegram.sendDraft(draft);
     await telegram.answerCallback("callback-7", "Approved");

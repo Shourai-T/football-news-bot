@@ -1,6 +1,7 @@
 # Copy this file to .dev.vars and provide local-only secret values.
 # RSS_FEEDS_JSON is public configuration in wrangler.jsonc.
-TELEGRAM_BOT_TOKEN=
+TELEGRAM_RELAY_URL=
+TELEGRAM_RELAY_SECRET=
 TELEGRAM_CHAT_ID=
 TELEGRAM_WEBHOOK_SECRET=
 DIAGNOSTIC_SECRET=

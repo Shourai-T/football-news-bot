@@ -17,6 +17,8 @@ declare global {
 }
 
 const CHAT_ID = "-100123";
+const RELAY_URL = "https://relay.test/telegram";
+const RELAY_SECRET = "relay-test-secret";
 const WEBHOOK_SECRET = "webhook-test-secret";
 const DIAGNOSTIC_SECRET = "diagnostic-test-secret";
 const article: Article = {
@@ -32,7 +34,8 @@ const article: Article = {
 function workerEnv(): Env {
   return {
     DB: env.DB,
-    TELEGRAM_BOT_TOKEN: "telegram-test-token",
+    TELEGRAM_RELAY_URL: RELAY_URL,
+    TELEGRAM_RELAY_SECRET: RELAY_SECRET,
     TELEGRAM_CHAT_ID: CHAT_ID,
     TELEGRAM_WEBHOOK_SECRET: WEBHOOK_SECRET,
     DIAGNOSTIC_SECRET,
@@ -40,6 +43,22 @@ function workerEnv(): Env {
     GEMINI_MODEL: "gemini-test-model",
     RSS_FEEDS_JSON: "[]",
   };
+}
+
+function relayResponse(body: unknown, status = 200): Response {
+  return Response.json({
+    ok: status >= 200 && status < 300,
+    status,
+    body: JSON.stringify(body),
+  });
+}
+
+function relayEnvelope(init: RequestInit | undefined): {
+  secret: string;
+  method: string;
+  body: Record<string, unknown>;
+} {
+  return JSON.parse(String(init?.body));
 }
 
 function callbackRequest(
@@ -95,7 +114,7 @@ describe("Telegram webhook", () => {
     let externalCalls = 0;
     const fetcher: typeof fetch = async () => {
       externalCalls += 1;
-      return Response.json({ ok: true, result: true });
+      return relayResponse({ ok: true, result: true });
     };
 
     const response = await handleTelegramWebhook(
@@ -113,7 +132,7 @@ describe("Telegram webhook", () => {
     const response = await handleTelegramWebhook(
       callbackRequest(draftId, { chatId: -999 }),
       workerEnv(),
-      async () => Response.json({ ok: true, result: true }),
+      async () => relayResponse({ ok: true, result: true }),
     );
 
     expect(response.status).toBe(403);
@@ -127,7 +146,7 @@ describe("Telegram webhook", () => {
       workerEnv(),
       async () => {
         externalCalls += 1;
-        return Response.json({ ok: true, result: true });
+        return relayResponse({ ok: true, result: true });
       },
     );
 
@@ -140,7 +159,7 @@ describe("Telegram webhook", () => {
     const response = await handleTelegramWebhook(
       callbackRequest(draftId, { data: `approve:${draftId}` }),
       workerEnv(),
-      async () => Response.json({ ok: true, result: true }),
+      async () => relayResponse({ ok: true, result: true }),
     );
 
     expect(response.status).toBe(400);
@@ -148,13 +167,13 @@ describe("Telegram webhook", () => {
   });
 
   it("atomically approves, acknowledges, and edits a pending draft", async () => {
-    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const calls: Array<{ input: string; envelope: ReturnType<typeof relayEnvelope> }> = [];
     const fetcher: typeof fetch = async (input, init) => {
       calls.push({
-        method: String(input).split("/").at(-1)!,
-        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        input: String(input),
+        envelope: relayEnvelope(init),
       });
-      return Response.json({ ok: true, result: true });
+      return relayResponse({ ok: true, result: true });
     };
 
     const response = await handleTelegramWebhook(callbackRequest(draftId), workerEnv(), fetcher);
@@ -163,16 +182,24 @@ describe("Telegram webhook", () => {
     expect(await draftStatus(draftId)).toBe("approved");
     expect(calls).toEqual([
       {
-        method: "answerCallbackQuery",
-        body: { callback_query_id: "callback-7", text: "Approved" },
+        input: RELAY_URL,
+        envelope: {
+          secret: RELAY_SECRET,
+          method: "answerCallbackQuery",
+          body: { callback_query_id: "callback-7", text: "Approved" },
+        },
       },
       {
-        method: "editMessageText",
-        body: {
-          chat_id: CHAT_ID,
-          message_id: 314,
-          text: `A factual draft.\n\nSource: ${article.canonicalUrl}\n\nStatus: APPROVED`,
-          reply_markup: { inline_keyboard: [] },
+        input: RELAY_URL,
+        envelope: {
+          secret: RELAY_SECRET,
+          method: "editMessageText",
+          body: {
+            chat_id: CHAT_ID,
+            message_id: 314,
+            text: `A factual draft.\n\nSource: ${article.canonicalUrl}\n\nStatus: APPROVED`,
+            reply_markup: { inline_keyboard: [] },
+          },
         },
       },
     ]);
@@ -181,8 +208,8 @@ describe("Telegram webhook", () => {
   it("rejects a pending draft and renders the rejected state", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const fetcher: typeof fetch = async (_input, init) => {
-      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-      return Response.json({ ok: true, result: true });
+      bodies.push(relayEnvelope(init).body);
+      return relayResponse({ ok: true, result: true });
     };
 
     const response = await handleTelegramWebhook(
@@ -202,11 +229,12 @@ describe("Telegram webhook", () => {
 
   it("keeps repeated approval idempotent", async () => {
     const callbackAnswers: string[] = [];
-    const fetcher: typeof fetch = async (input, init) => {
-      if (String(input).endsWith("/answerCallbackQuery")) {
-        callbackAnswers.push((JSON.parse(String(init?.body)) as { text: string }).text);
+    const fetcher: typeof fetch = async (_input, init) => {
+      const envelope = relayEnvelope(init);
+      if (envelope.method === "answerCallbackQuery") {
+        callbackAnswers.push((envelope.body as { text: string }).text);
       }
-      return Response.json({ ok: true, result: true });
+      return relayResponse({ ok: true, result: true });
     };
 
     await handleTelegramWebhook(callbackRequest(draftId), workerEnv(), fetcher);
@@ -224,12 +252,12 @@ describe("Telegram webhook", () => {
   it("still edits the message when callback acknowledgement fails", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const calledMethods: string[] = [];
-    const fetcher: typeof fetch = async (input) => {
-      const method = String(input).split("/").at(-1)!;
+    const fetcher: typeof fetch = async (_input, init) => {
+      const method = relayEnvelope(init).method;
       calledMethods.push(method);
       return method === "answerCallbackQuery"
-        ? Response.json({ ok: false }, { status: 500 })
-        : Response.json({ ok: true, result: true });
+        ? relayResponse({ ok: false }, 500)
+        : relayResponse({ ok: true, result: true });
     };
 
     const response = await handleTelegramWebhook(callbackRequest(draftId), workerEnv(), fetcher);
@@ -245,12 +273,12 @@ describe("Telegram webhook", () => {
   it("returns 502 after an edit failure even when acknowledgement succeeds", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const calledMethods: string[] = [];
-    const fetcher: typeof fetch = async (input) => {
-      const method = String(input).split("/").at(-1)!;
+    const fetcher: typeof fetch = async (_input, init) => {
+      const method = relayEnvelope(init).method;
       calledMethods.push(method);
       return method === "editMessageText"
-        ? Response.json({ ok: false }, { status: 500 })
-        : Response.json({ ok: true, result: true });
+        ? relayResponse({ ok: false }, 500)
+        : relayResponse({ ok: true, result: true });
     };
 
     const response = await handleTelegramWebhook(callbackRequest(draftId), workerEnv(), fetcher);
@@ -307,7 +335,7 @@ describe("Telegram webhook", () => {
 
   it("probes Telegram from the Worker without returning bot details", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({ ok: true, result: { id: 8702486864, username: "private" } }),
+      relayResponse({ ok: true, result: { id: 8702486864, username: "private" } }),
     );
     vi.stubGlobal("fetch", fetcher);
 
@@ -322,7 +350,12 @@ describe("Telegram webhook", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "ok" });
     expect(fetcher).toHaveBeenCalledOnce();
-    expect(String(fetcher.mock.calls[0]?.[0])).toBe("https://api.telegram.org/bottelegram-test-token/getMe");
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(RELAY_URL);
+    expect(relayEnvelope(fetcher.mock.calls[0]?.[1])).toEqual({
+      secret: RELAY_SECRET,
+      method: "getMe",
+      body: {},
+    });
   });
 
   it("redacts a failed Telegram health probe", async () => {
@@ -383,7 +416,7 @@ describe("Telegram webhook", () => {
 
   it("classifies a Telegram health response timeout as a timeout", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const providerResponse = Response.json({ ok: true });
+    const providerResponse = relayResponse({ ok: true });
     vi.spyOn(providerResponse, "json").mockRejectedValue(new DOMException("request aborted", "AbortError"));
     vi.stubGlobal("fetch", async () => providerResponse);
 
