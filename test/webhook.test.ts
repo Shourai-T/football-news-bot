@@ -288,6 +288,22 @@ describe("Telegram webhook", () => {
     expect(response.status).toBe(401);
   });
 
+  it("rejects a wrong diagnostic secret before probing Telegram", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await worker.fetch(
+      new Request("https://worker.test/internal/telegram-health", {
+        method: "POST",
+        headers: { "X-Diagnostic-Secret": "wrong-secret" },
+      }),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("probes Telegram from the Worker without returning bot details", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       Response.json({ ok: true, result: { id: 8702486864, username: "private" } }),
@@ -306,5 +322,27 @@ describe("Telegram webhook", () => {
     expect(await response.json()).toEqual({ status: "ok" });
     expect(fetcher).toHaveBeenCalledOnce();
     expect(String(fetcher.mock.calls[0]?.[0])).toBe("https://api.telegram.org/bottelegram-test-token/getMe");
+  });
+
+  it("redacts a failed Telegram health probe", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("provider details and token must stay private");
+    });
+
+    const response = await worker.fetch(
+      new Request("https://worker.test/internal/telegram-health", {
+        method: "POST",
+        headers: { "X-Diagnostic-Secret": DIAGNOSTIC_SECRET },
+      }),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ status: "unavailable", category: "telegram_network_error" });
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "telegram_health_failed",
+      category: "telegram_network_error",
+    }));
   });
 });

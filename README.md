@@ -36,7 +36,7 @@ Apply the migration to the remote database:
 npx wrangler d1 migrations apply DB --remote
 ```
 
-Set all five secret fields. Wrangler prompts for each value without storing it in the repository:
+Set all five runtime secret fields. Wrangler prompts for each value without storing it in the repository:
 
 ```sh
 npx wrangler secret put TELEGRAM_BOT_TOKEN
@@ -44,6 +44,27 @@ npx wrangler secret put TELEGRAM_CHAT_ID
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put GEMINI_MODEL
+```
+
+## Temporary Telegram health diagnostic
+
+Use this only to diagnose a Worker-to-Telegram connection failure. Create a separate temporary secret; do not reuse the Telegram webhook secret:
+
+```sh
+npx wrangler secret put DIAGNOSTIC_SECRET
+```
+
+With that value available only in your terminal, call the diagnostic endpoint. It calls Telegram `getMe` from the Worker, does not call Gemini, and does not send a message:
+
+```sh
+curl --request POST "https://<WORKER_HOST>/internal/telegram-health" \
+  --header "X-Diagnostic-Secret: <DIAGNOSTIC_SECRET>"
+```
+
+The only successful response is `{"status":"ok"}`. After diagnosis, remove this endpoint in a follow-up deployment and delete the temporary secret:
+
+```sh
+npx wrangler secret delete DIAGNOSTIC_SECRET
 ```
 
 Review the versioned `RSS_FEEDS_JSON` value in `wrangler.jsonc`. It is public configuration and remains directly editable. It initially contains verified RSS endpoints for BBC Sport Football, Sky Sports Football, and Liverpool FC; remove or replace a source if it stops returning RSS/Atom.
@@ -65,7 +86,7 @@ curl --request POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook
   --data '{"url":"https://<WORKER_HOST>/telegram","secret_token":"<TELEGRAM_WEBHOOK_SECRET>","allowed_updates":["callback_query"]}'
 ```
 
-The Worker accepts `POST /telegram` only. It verifies Telegram's secret header, configured chat ID, and stored Telegram message ID before changing a draft. Approval and rejection callbacks use compact `a:<draft-id>` and `r:<draft-id>` payloads.
+The Worker accepts `POST /telegram` for callbacks. It verifies Telegram's secret header, configured chat ID, and stored Telegram message ID before changing a draft. Approval and rejection callbacks use compact `a:<draft-id>` and `r:<draft-id>` payloads. The separate temporary route `POST /internal/telegram-health` requires `DIAGNOSTIC_SECRET`.
 
 ## Operations
 
