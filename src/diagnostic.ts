@@ -1,4 +1,4 @@
-import { TelegramClient } from "./telegram";
+import { TelegramClient, TelegramRequestError } from "./telegram";
 import type { Env } from "./types";
 
 export async function handleTelegramHealth(
@@ -19,8 +19,9 @@ export async function handleTelegramHealth(
     return Response.json({ status: "ok" });
   } catch (error) {
     const category = errorCategory(error);
+    const transport = error instanceof TelegramRequestError ? error.transport : "fetch_rejected";
     console.error(JSON.stringify({ event: "telegram_health_failed", category }));
-    return Response.json({ status: "unavailable", category }, { status: 502 });
+    return Response.json({ status: "unavailable", category, transport }, { status: 502 });
   }
 }
 

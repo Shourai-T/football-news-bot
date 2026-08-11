@@ -326,8 +326,9 @@ describe("Telegram webhook", () => {
 
   it("redacts a failed Telegram health probe", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const secretLookingError = "provider details bot123456:secret-token must stay private";
     vi.stubGlobal("fetch", async () => {
-      throw new Error("provider details and token must stay private");
+      throw new Error(secretLookingError);
     });
 
     const response = await worker.fetch(
@@ -339,10 +340,43 @@ describe("Telegram webhook", () => {
     );
 
     expect(response.status).toBe(502);
-    expect(await response.json()).toEqual({ status: "unavailable", category: "telegram_network_error" });
+    const responseBody = await response.text();
+    expect(JSON.parse(responseBody)).toEqual({
+      status: "unavailable",
+      category: "telegram_network_error",
+      transport: "fetch_rejected",
+    });
+    expect(responseBody).not.toContain(secretLookingError);
     expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
       event: "telegram_health_failed",
       category: "telegram_network_error",
+    }));
+    expect(consoleError.mock.calls.flat().join("\n")).not.toContain(secretLookingError);
+  });
+
+  it("classifies an aborted Telegram health probe as a timeout", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", async () => {
+      throw new DOMException("request aborted", "AbortError");
+    });
+
+    const response = await worker.fetch(
+      new Request("https://worker.test/internal/telegram-health", {
+        method: "POST",
+        headers: { "X-Diagnostic-Secret": DIAGNOSTIC_SECRET },
+      }),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      status: "unavailable",
+      category: "telegram_timeout",
+      transport: "timeout",
+    });
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "telegram_health_failed",
+      category: "telegram_timeout",
     }));
   });
 });

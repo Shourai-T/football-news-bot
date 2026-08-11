@@ -10,6 +10,15 @@ interface TelegramResponse {
   result?: unknown;
 }
 
+export class TelegramRequestError extends Error {
+  constructor(
+    message: "telegram_timeout" | "telegram_network_error",
+    readonly transport: "timeout" | "fetch_rejected",
+  ) {
+    super(message);
+  }
+}
+
 export class TelegramClient {
   readonly #baseUrl: string;
 
@@ -75,7 +84,11 @@ export class TelegramClient {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (error) {
-      throw new Error(isTimeout(error) ? "telegram_timeout" : "telegram_network_error");
+      const timeout = isTimeout(error);
+      throw new TelegramRequestError(
+        timeout ? "telegram_timeout" : "telegram_network_error",
+        timeout ? "timeout" : "fetch_rejected",
+      );
     }
 
     if (!response.ok) {
