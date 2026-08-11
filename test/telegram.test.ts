@@ -46,6 +46,7 @@ describe("TelegramClient", () => {
       "https://api.telegram.org",
       "https://api.telegram.org/bot/token/sendMessage",
       "https://api.telegram.org/?method=getMe",
+      "https://api.telegram.org./bot/token/sendMessage",
     ]) {
       expect(() => client(fetcher, relayUrl)).toThrow("telegram_relay_configuration_error");
       expect(() => client(fetcher, relayUrl)).not.toThrow(relayUrl);
