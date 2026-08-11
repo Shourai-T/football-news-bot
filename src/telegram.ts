@@ -187,7 +187,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isTelegramApiUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname.replace(/\.$/, "") === "api.telegram.org";
+    return url.hostname.replace(/\.$/, "") === "api.telegram.org";
   } catch {
     return false;
   }
