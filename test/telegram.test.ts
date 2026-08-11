@@ -116,6 +116,102 @@ describe("TelegramClient", () => {
     });
   });
 
+  it.each([302, 303])("follows a Google Apps Script %s redirect with a bodyless GET", async (status) => {
+    const redirectUrl = "https://script.googleusercontent.com/macros/echo?user_content_key=opaque";
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      return calls.length === 1
+        ? new Response(null, { status, headers: { location: redirectUrl } })
+        : relayResponse({ ok: true, result: { id: 12345 } });
+    };
+
+    await expect(client(fetcher).checkHealth()).resolves.toBeUndefined();
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.input).toBe(RELAY_URL);
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.redirect).toBe("manual");
+    expect(relayBody(calls[0]?.init).secret).toBe(RELAY_SECRET);
+    expect(calls[1]).toEqual({
+      input: redirectUrl,
+      init: {
+        method: "GET",
+        redirect: "error",
+        signal: calls[0]?.init?.signal,
+      },
+    });
+  });
+
+  it.each([
+    [301, "https://script.googleusercontent.com/macros/echo"],
+    [307, "https://script.googleusercontent.com/macros/echo"],
+    [302, "http://script.googleusercontent.com/macros/echo"],
+    [302, "https://script.googleusercontent.com.evil.test/macros/echo"],
+    [302, "https://sub.script.googleusercontent.com/macros/echo"],
+    [302, "https://script.googleusercontent.com./macros/echo"],
+    [302, "https://user@script.googleusercontent.com/macros/echo"],
+  ])("rejects relay redirect status %s and target %s", async (status, location) => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(null, {
+      status,
+      headers: { location },
+    }));
+
+    await expect(client(fetcher).checkHealth()).rejects.toThrow("telegram_relay_redirect_error");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a redirect without a location before a second fetch", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(null, { status: 302 }));
+
+    await expect(client(fetcher).checkHealth()).rejects.toThrow("telegram_relay_redirect_error");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("redacts a rejected fetch after a valid relay redirect", async () => {
+    const createFetcher = () => vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, {
+        status: 302,
+        headers: { location: "https://script.googleusercontent.com/macros/echo?private=value" },
+      }))
+      .mockRejectedValueOnce(new TypeError("private transport detail"));
+
+    await expect(client(createFetcher()).checkHealth()).rejects.toMatchObject({
+      message: "telegram_network_error",
+      transport: "fetch_rejected",
+    });
+    await expect(client(createFetcher()).checkHealth()).rejects.not.toThrow("private transport detail");
+  });
+
+  it("classifies a timeout during the redirected GET", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, {
+        status: 302,
+        headers: { location: "https://script.googleusercontent.com/macros/echo" },
+      }))
+      .mockRejectedValueOnce(new DOMException("request timed out", "TimeoutError"));
+
+    await expect(client(fetcher).checkHealth()).rejects.toMatchObject({
+      message: "telegram_timeout",
+      transport: "timeout",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a second redirect without making a third request", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, {
+        status: 302,
+        headers: { location: "https://script.googleusercontent.com/macros/echo" },
+      }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: 302,
+        headers: { location: "https://attacker.test/steal" },
+      }));
+
+    await expect(client(fetcher).checkHealth()).rejects.toThrow("telegram_relay_error");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("acknowledges a callback through a relay answerCallbackQuery envelope", async () => {
     const calls: Array<{ input: RequestInfo | URL; envelope: ReturnType<typeof relayBody> }> = [];
     const fetcher: typeof fetch = async (input, init) => {

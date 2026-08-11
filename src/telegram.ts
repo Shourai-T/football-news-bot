@@ -21,6 +21,12 @@ interface RelayResponseWithBody extends RelayResponse {
   body: string;
 }
 
+class TelegramRelayRedirectError extends Error {
+  constructor() {
+    super("telegram_relay_redirect_error");
+  }
+}
+
 export class TelegramRequestError extends Error {
   constructor(
     message: "telegram_timeout" | "telegram_network_error",
@@ -88,6 +94,7 @@ export class TelegramClient {
   async #request(method: string, body: Record<string, unknown>): Promise<TelegramResponse> {
     let response: Response;
     try {
+      const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
       response = await this.fetcher(this.config.relayUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -97,9 +104,14 @@ export class TelegramClient {
           method,
           body,
         }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        redirect: "manual",
+        signal,
       });
+      response = await followAppsScriptRedirect(response, this.fetcher, signal);
     } catch (error) {
+      if (error instanceof TelegramRelayRedirectError) {
+        throw error;
+      }
       const timeout = isTimeout(error);
       throw new TelegramRequestError(
         timeout ? "telegram_timeout" : "telegram_network_error",
@@ -144,6 +156,46 @@ export class TelegramClient {
     }
 
     return payload;
+  }
+}
+
+async function followAppsScriptRedirect(
+  response: Response,
+  fetcher: typeof fetch,
+  signal: AbortSignal,
+): Promise<Response> {
+  if (!isRedirectStatus(response.status)) {
+    if (response.status >= 300 && response.status < 400) {
+      throw new TelegramRelayRedirectError();
+    }
+    return response;
+  }
+
+  const location = response.headers.get("location");
+  if (location === null || !isAllowedAppsScriptRedirect(location)) {
+    throw new TelegramRelayRedirectError();
+  }
+
+  return fetcher(location, {
+    method: "GET",
+    redirect: "error",
+    signal,
+  });
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status === 302 || status === 303;
+}
+
+function isAllowedAppsScriptRedirect(location: string): boolean {
+  try {
+    const url = new URL(location);
+    return url.protocol === "https:" &&
+      url.hostname === "script.googleusercontent.com" &&
+      url.username === "" &&
+      url.password === "";
+  } catch {
+    return false;
   }
 }
 
