@@ -24,12 +24,18 @@ The Worker never calls the Telegram Bot API directly. Outbound `getMe`, `sendMes
 2. In **Project Settings**, add these Script Properties with values known only to the operator: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `RELAY_SHARED_SECRET`. Use the same shared-secret value later for Cloudflare's `TELEGRAM_RELAY_SECRET`.
 3. Deploy it as a **Web app**. Set **Execute as** to **Me** and **Who has access** to **Anyone**, then copy the Web app URL. Create a new deployment after changing the source.
 
-Before configuring Cloudflare, verify the relay from a terminal. Substitute values locally; do not save the command with its substituted values or expose the response body:
+Before configuring Cloudflare, verify the relay from a terminal. Enter the URL and shared secret only at the prompts so neither is placed in shell history; do not expose the response body:
 
 ```sh
-curl --location "<TELEGRAM_RELAY_URL>" \
+printf 'Relay URL: '
+read -r RELAY_URL
+printf 'Relay shared secret: '
+read -rs RELAY_SHARED_SECRET
+printf '\n'
+curl --location "$RELAY_URL" \
   --header "content-type: application/json" \
-  --data '{"secret":"<RELAY_SHARED_SECRET>","method":"getMe","body":{}}'
+  --data "{\"secret\":\"$RELAY_SHARED_SECRET\",\"method\":\"getMe\",\"body\":{}}"
+unset RELAY_URL RELAY_SHARED_SECRET
 ```
 
 The successful envelope has `ok: true`, status `200`, and a serialized Telegram response body. The relay accepts only the four outbound methods listed above and rejects a request whose `chat_id` is not the configured chat.
