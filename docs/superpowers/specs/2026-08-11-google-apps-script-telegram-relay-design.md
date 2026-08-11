@@ -29,3 +29,9 @@ Tests prove all Telegram methods use the relay envelope, the relay secret never 
 ## Scope
 
 The relay source is committed under `relay/Code.gs` as the reviewed deployment source. No X API integration, retry policy, scheduler change, D1 change, or additional third-party service is included. The temporary diagnostic endpoint is retained until a deployed relay health check has passed.
+
+## Approved security amendment
+
+Every relay envelope must include a top-level `chatId`, including `getMe` and `answerCallbackQuery`. Apps Script rejects a missing or non-matching top-level value before it considers a method or calls `UrlFetchApp`. When a Telegram body also includes `chat_id`, it must match the same configured Script Property. This prevents methods such as `answerCallbackQuery` and the `inline_message_id` form of `editMessageText` from bypassing the configured-chat boundary.
+
+The README relay test must pass safely encoded JSON on stdin to curl, never interpolate a secret into command arguments, and emit only a fixed local success/failure message. The current historical cloud design and MVP plan are marked superseded for Telegram secret placement so no operator restores `TELEGRAM_BOT_TOKEN` to Cloudflare.

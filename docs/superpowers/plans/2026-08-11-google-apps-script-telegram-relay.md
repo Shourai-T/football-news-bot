@@ -72,3 +72,42 @@ Add `relay/Code.gs` with the exact allowlist, secret validation, chat ID validat
 - [ ] **Step 2: Run full verification and commit**
 
 Run `npm run typecheck && npm test && npm run lint && git diff --check`; all commands must exit 0. Stage Task 2 files plus these design and plan documents; commit with `docs: add telegram relay deployment`.
+
+### Task 3: Require chat metadata and harden operations documentation
+
+**Files:**
+- Modify: `src/telegram.ts`
+- Modify: `test/telegram.test.ts`
+- Modify: `relay/Code.gs`
+- Create: `test/relay.test.ts`
+- Modify: `README.md`
+- Modify: `docs/superpowers/specs/2026-08-10-football-news-bot-cloud-design.md`
+- Modify: `docs/superpowers/plans/2026-08-10-football-news-bot-cloud-mvp.md`
+
+**Interfaces:**
+- Produces relay envelopes shaped as `{ secret: string, chatId: string, method: string, body: Record<string, unknown> }`.
+- Apps Script requires top-level `chatId` to equal Script Property `TELEGRAM_CHAT_ID` for every request, then requires a body `chat_id` to match if one is supplied.
+
+- [ ] **Step 1: Write failing Worker and Apps Script behavior tests**
+
+Add a Worker test proving `answerCallbackQuery` sends the configured `chatId` in the relay envelope. Add an Apps Script harness test that evaluates `relay/Code.gs` with mocked `PropertiesService`, `UrlFetchApp`, and `ContentService`; prove missing or mismatched top-level `chatId` returns `{ ok: false, error: "invalid_chat" }` without calling `UrlFetchApp`, and a matching `answerCallbackQuery` calls only its allowlisted Telegram method.
+
+- [ ] **Step 2: Run focused tests to verify failure**
+
+Run `npm test -- telegram.test.ts relay.test.ts`. The new expectations must fail because the Worker lacks top-level chat metadata and the Script currently allows missing chat metadata.
+
+- [ ] **Step 3: Implement the smallest protocol amendment**
+
+Add `chatId: this.config.chatId` to every relay envelope. Require a string `request.chatId` equal to the configured Script Property before relay method processing. Keep the existing nested body `chat_id` check. Do not make any direct Telegram request or alter the allowlist.
+
+- [ ] **Step 4: Harden the README test and supersede historical secret guidance**
+
+Document `read`-based URL/chat ID/secret input. Use a stdin-only Node JSON encoder and `curl --data-binary @- --location` so neither the secret nor JSON payload occurs in command arguments. Pipe the relay response to a local JSON parser that prints only `Relay getMe succeeded.` for `{ ok: true, status: 200 }` and `Relay getMe failed.` otherwise. Add an explicit superseded notice to each historical document stating that `TELEGRAM_BOT_TOKEN` is no longer a Cloudflare/Worker secret and linking to the current relay README.
+
+- [ ] **Step 5: Run focused tests to verify success**
+
+Run `npm test -- telegram.test.ts relay.test.ts`. Both suites must pass.
+
+- [ ] **Step 6: Run full verification and commit**
+
+Run `npm run typecheck && npm test && npm run lint && git diff --check`; all commands must exit 0. Commit with `fix: enforce relay chat scope`.
