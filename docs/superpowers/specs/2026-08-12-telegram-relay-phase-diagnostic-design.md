@@ -1,7 +1,7 @@
 # Telegram Relay Phase Diagnostic Design
 
 Date: 2026-08-12
-Status: approved concept, written design pending review
+Status: approved
 
 ## Context
 
