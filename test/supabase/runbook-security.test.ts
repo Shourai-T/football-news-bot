@@ -12,9 +12,12 @@ describe("Supabase cutover runbook", () => {
     expect(readme).not.toContain('--data "{\\"url\\"');
   });
 
-  it("makes incomplete D1 inspection a hard cutover stop", () => {
-    expect(readme).toContain("D1_CUTOVER_BLOCKED");
-    expect(readme).toContain("7403");
+  it("makes incomplete D1 inspection a hard stop and records the cleared checkpoint", () => {
+    expect(readme).toContain("D1_CUTOVER_CLEARED");
+    expect(readme).toContain("pending_drafts = 0");
+    expect(readme).toContain("approved_drafts = 0");
+    expect(readme).toContain("(SELECT COUNT(*) FROM drafts)");
+    expect(readme).not.toContain("UNION ALL");
     expect(readme).toContain("Do not run the smoke test, switch webhooks, or enable Cron");
     expect(readme).toContain("pending_drafts");
     expect(readme).toContain("approved_drafts");

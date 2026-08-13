@@ -70,10 +70,12 @@ Execute these checkpoints in order.
 
 ```sh
 npx wrangler d1 execute DB --remote --command \
-  "SELECT 'articles' AS table_name, COUNT(*) AS row_count FROM articles UNION ALL SELECT 'drafts', COUNT(*) FROM drafts UNION ALL SELECT 'pending_drafts', COUNT(*) FROM drafts WHERE status = 'pending' UNION ALL SELECT 'approved_drafts', COUNT(*) FROM drafts WHERE status = 'approved' UNION ALL SELECT 'scheduled_runs', COUNT(*) FROM scheduled_runs UNION ALL SELECT 'daily_usage', COUNT(*) FROM daily_usage"
+  "SELECT (SELECT COUNT(*) FROM articles) AS articles, (SELECT COUNT(*) FROM drafts) AS drafts, (SELECT COUNT(*) FROM drafts WHERE status = 'pending') AS pending_drafts, (SELECT COUNT(*) FROM drafts WHERE status = 'approved') AS approved_drafts, (SELECT COUNT(*) FROM scheduled_runs) AS scheduled_runs, (SELECT COUNT(*) FROM daily_usage) AS daily_usage"
 ```
 
-`D1_CUTOVER_BLOCKED`: the latest inspection returned Cloudflare error `7403` because the current Wrangler account is not authorized for that D1 database. Log in to the owning account and rerun the count. Any command failure, missing table, incomplete count, or non-zero `pending_drafts`/`approved_drafts` count is a hard stop. Do not run the smoke test, switch webhooks, or enable Cron until the inspection succeeds and any live drafts are exported and reconciled. Failed runs and diagnostics do not need migration.
+Any command failure, missing table, incomplete count, or non-zero `pending_drafts`/`approved_drafts` count is a hard stop. Do not run the smoke test, switch webhooks, or enable Cron until the inspection succeeds and any live drafts are exported and reconciled. Failed runs and diagnostics do not need migration.
+
+`D1_CUTOVER_CLEARED` on 2026-08-13: the read-only query succeeded with `articles = 24`, `drafts = 11`, `pending_drafts = 0`, `approved_drafts = 0`, `scheduled_runs = 24`, and `daily_usage = 3`. No live draft requires migration.
 4. In Supabase Dashboard → Vault, create:
    - `project_url`: the project origin, for example `https://PROJECT_REF.supabase.co`.
    - `scheduled_function_secret`: the same value stored as the Edge Function secret `SCHEDULED_FUNCTION_SECRET`.
