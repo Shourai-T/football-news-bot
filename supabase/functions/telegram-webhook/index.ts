@@ -1,8 +1,13 @@
-import { createTelegramWebhookViabilityHandler } from "./viability-handler.ts";
+import { createAdminClient } from "../_shared/database-client.ts";
+import { SupabaseBotRepository } from "../_shared/repository.ts";
+import { createTelegramWebhookHandler } from "./handler.ts";
+
+const readEnv = (name: string): string | undefined => Deno.env.get(name);
 
 export default {
-  fetch: createTelegramWebhookViabilityHandler({
-    readEnv: (name) => Deno.env.get(name),
+  fetch: createTelegramWebhookHandler({
+    readEnv,
     fetcher: fetch,
+    repository: new SupabaseBotRepository(createAdminClient(readEnv)),
   }),
 };

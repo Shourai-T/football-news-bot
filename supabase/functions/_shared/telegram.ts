@@ -1,8 +1,14 @@
+import type {
+  DraftStatus,
+  TelegramDraft,
+} from "./domain-types.ts";
+import { MAX_DRAFT_BODY_LENGTH } from "./limits.ts";
+
 const REQUEST_TIMEOUT_MS = 8_000;
 const TELEGRAM_API_ROOT = "https://api.telegram.org";
 const DIAGNOSTIC_TEXT = "Supabase Telegram diagnostic succeeded.";
-const WEBHOOK_PROBE_TEXT =
-  "Tap the button to verify Telegram → Supabase webhook delivery.";
+const TELEGRAM_TEXT_LIMIT = 4_096;
+const SOURCE_PREFIX = "\n\nSource: ";
 
 export interface DirectTelegramConfig {
   botToken: string;
@@ -42,28 +48,40 @@ export class TelegramClient {
     return messageId;
   }
 
-  async sendWebhookProbe(): Promise<number> {
-    const response = await this.request("sendMessage", {
-      chat_id: this.config.chatId,
-      text: WEBHOOK_PROBE_TEXT,
-      reply_markup: {
-        inline_keyboard: [[{
-          text: "Test Supabase webhook",
-          callback_data: "v:1",
-        }]],
-      },
-    });
-    const messageId = getMessageId(response.result);
-    if (messageId === null) {
-      throw new Error("telegram_invalid_response");
-    }
-    return messageId;
-  }
-
   async answerCallback(callbackQueryId: string, text: string): Promise<void> {
     await this.request("answerCallbackQuery", {
       callback_query_id: callbackQueryId,
       text,
+    });
+  }
+
+  async sendDraft(draft: TelegramDraft): Promise<number> {
+    const response = await this.request("sendMessage", {
+      chat_id: this.config.chatId,
+      text: formatDraft(draft),
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "Approve", callback_data: `a:${draft.id}` },
+          { text: "Reject", callback_data: `r:${draft.id}` },
+        ]],
+      },
+    });
+    const messageId = getMessageId(response.result);
+    if (messageId === null) throw new Error("telegram_invalid_response");
+    return messageId;
+  }
+
+  async editDraftState(
+    telegramMessageId: number,
+    currentText: string,
+    status: Exclude<DraftStatus, "pending">,
+  ): Promise<void> {
+    const suffix = `\n\nStatus: ${status.toUpperCase()}`;
+    await this.request("editMessageText", {
+      chat_id: this.config.chatId,
+      message_id: telegramMessageId,
+      text: truncate(currentText, TELEGRAM_TEXT_LIMIT - suffix.length) + suffix,
+      reply_markup: { inline_keyboard: [] },
     });
   }
 
@@ -166,6 +184,16 @@ function parseWebhookInfo(value: unknown): TelegramWebhookInfo | null {
     url: value.url,
     pendingUpdateCount: value.pending_update_count,
   };
+}
+
+function formatDraft(draft: TelegramDraft): string {
+  const body = truncate(draft.body, MAX_DRAFT_BODY_LENGTH);
+  const sourceLength = TELEGRAM_TEXT_LIMIT - body.length - SOURCE_PREFIX.length;
+  return `${body}${SOURCE_PREFIX}${truncate(draft.canonicalUrl, sourceLength)}`;
+}
+
+function truncate(value: string, maximumLength: number): string {
+  return value.slice(0, Math.max(0, maximumLength));
 }
 
 function isTimeout(error: unknown): boolean {

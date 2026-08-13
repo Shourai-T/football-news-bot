@@ -55,34 +55,6 @@ describe("direct Telegram client", () => {
     });
   });
 
-  it("sends one controlled webhook probe button to the configured chat", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
-      ok: true,
-      result: {
-        message_id: 78,
-        date: 1_786_357_502,
-        text: "Tap the button to verify Telegram → Supabase webhook delivery.",
-        chat: { id: 1_331_364_954, type: "private" },
-      },
-    }));
-    const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
-
-    await expect(client.sendWebhookProbe()).resolves.toBe(78);
-
-    const [url, init] = fetcher.mock.calls[0]!;
-    expect(String(url)).toBe("https://api.telegram.org/bottest-token/sendMessage");
-    expect(JSON.parse(String(init?.body))).toEqual({
-      chat_id: "1331364954",
-      text: "Tap the button to verify Telegram → Supabase webhook delivery.",
-      reply_markup: {
-        inline_keyboard: [[{
-          text: "Test Supabase webhook",
-          callback_data: "v:1",
-        }]],
-      },
-    });
-  });
-
   it("answers the controlled webhook callback without a relay", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       ok: true,
@@ -103,6 +75,63 @@ describe("direct Telegram client", () => {
       callback_query_id: "callback-query-1",
       text: "Supabase webhook received.",
     });
+  });
+
+  it("sends a reviewable draft with compact approve and reject callbacks", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: { message_id: 314 },
+    }));
+    const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
+
+    await expect(client.sendDraft({
+      id: 42,
+      body: "Club confirms the transfer.",
+      canonicalUrl: "https://club.test/news/transfer",
+    })).resolves.toBe(314);
+
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe("https://api.telegram.org/bottest-token/sendMessage");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      chat_id: "1331364954",
+      text: "Club confirms the transfer.\n\nSource: https://club.test/news/transfer",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "Approve", callback_data: "a:42" },
+          { text: "Reject", callback_data: "r:42" },
+        ]],
+      },
+    });
+  });
+
+  it("edits a delivered draft to a bounded terminal state without buttons", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: true,
+    }));
+    const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
+
+    await client.editDraftState(
+      314,
+      `${"x".repeat(4_096)}\n\nSource: https://club.test/news/transfer`,
+      "approved",
+    );
+
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe(
+      "https://api.telegram.org/bottest-token/editMessageText",
+    );
+    const payload = JSON.parse(String(init?.body)) as {
+      chat_id: string;
+      message_id: number;
+      text: string;
+      reply_markup: unknown;
+    };
+    expect(payload.chat_id).toBe("1331364954");
+    expect(payload.message_id).toBe(314);
+    expect(payload.text).toHaveLength(4_096);
+    expect(payload.text).toMatch(/\n\nStatus: APPROVED$/u);
+    expect(payload.reply_markup).toEqual({ inline_keyboard: [] });
   });
 
   it("reads only the safe webhook routing fields", async () => {

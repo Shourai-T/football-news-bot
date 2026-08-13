@@ -13,7 +13,6 @@ function request(
   operation:
     | "getMe"
     | "sendMessage"
-    | "sendWebhookProbe"
     | "getWebhookInfo"
     | "setWebhook",
   secret = "scheduled-test-secret",
@@ -89,30 +88,6 @@ describe("Telegram diagnostic handler", () => {
     await expect(response.json()).resolves.toEqual({
       status: "ok",
       operation: "sendMessage",
-    });
-  });
-
-  it("sends a webhook probe without returning its message identifier", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
-      ok: true,
-      result: {
-        message_id: 78,
-        date: 1_786_357_502,
-        text: "Tap the button to verify Telegram → Supabase webhook delivery.",
-        chat: { id: 1_331_364_954, type: "private" },
-      },
-    }));
-    const handler = createTelegramDiagnosticHandler({
-      readEnv: (name) => ENV.get(name),
-      fetcher,
-    });
-
-    const response = await handler(request("sendWebhookProbe"));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      status: "ok",
-      operation: "sendWebhookProbe",
     });
   });
 
