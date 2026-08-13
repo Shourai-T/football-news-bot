@@ -12,19 +12,15 @@ describe("Supabase cutover runbook", () => {
     expect(readme).not.toContain('--data "{\\"url\\"');
   });
 
-  it("makes incomplete D1 inspection a hard stop and records the cleared checkpoint", () => {
-    expect(readme).toContain("D1_CUTOVER_CLEARED");
-    expect(readme).toContain("pending_drafts = 0");
-    expect(readme).toContain("approved_drafts = 0");
-    expect(readme).toContain("(SELECT COUNT(*) FROM drafts)");
-    expect(readme).not.toContain("UNION ALL");
-    expect(readme).toContain("Do not run the smoke test, switch webhooks, or enable Cron");
-    expect(readme).toContain("pending_drafts");
-    expect(readme).toContain("approved_drafts");
+  it("keeps the retired D1 database as an explicitly retained backup", () => {
+    expect(readme).toContain("Keep the Cloudflare Worker disabled");
+    expect(readme).toContain("Keep the remote D1 database as a read-only backup");
+    expect(readme).toContain("separately authorizes deletion");
+    expect(readme).not.toContain("npx wrangler");
   });
 
   it("requires function-log verification after a Cron invocation", () => {
-    expect(readme).toContain("Edge Functions → scheduled-pipeline → Logs");
+    expect(readme).toContain("Edge Functions → `scheduled-pipeline` → Logs");
     expect(readme).toContain("HTTP 2xx");
   });
 
