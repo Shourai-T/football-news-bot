@@ -1,139 +1,127 @@
 # Football News Bot
 
-A Cloudflare Worker that reads configured public football RSS/Atom feeds five times per day, drafts one factual English post with Gemini, and sends it to a private Telegram chat for approval or rejection. Approval is a durable D1 state only: this MVP contains no X integration or publishing code.
+Supabase Edge Functions fetch verified football RSS/Atom feeds, select one eligible story, ask Gemini for a factual English draft, and send it to a private Telegram chat for approval or rejection. The bot runs at most five content slots per Vietnam day.
 
-## Safety boundary
+Approval is stored durably in Postgres. Publishing to X is intentionally not implemented yet; X API credits and OAuth are a separate phase.
 
-Use public RSS or Atom endpoints only. Do not scrape club websites or article pages. Verify each configured feed before deployment. Keep Gemini and Worker relay values in Wrangler secrets; keep the Telegram bot token exclusively in Google Apps Script Script Properties. The relay shared-secret value is stored under separate names in Apps Script and Cloudflare. Never add credential values to `wrangler.jsonc`, `.dev.vars.example`, shell history, logs, or source control.
+## Runtime architecture
 
-## Install and test
+```text
+Supabase Cron (5 slots/day)
+  -> scheduled-pipeline Edge Function
+  -> BBC / Sky Sports / Liverpool FC RSS
+  -> Postgres deduplication and Gemini quota reservation
+  -> Gemini draft
+  -> Telegram Approve / Reject message
+
+Telegram callback
+  -> telegram-webhook Edge Function
+  -> Postgres approved / rejected state
+```
+
+Cloudflare Worker, D1, and Google Apps Script are rollback-only until the Supabase production smoke test and one approval succeed. Do not run Cloudflare Cron and Supabase Cron at the same time.
+
+## Local verification
+
+Requirements: Node.js, Docker Desktop, Deno, and Supabase CLI.
 
 ```sh
 npm install
+npx supabase start
+npx supabase db reset
 npm test
 npm run typecheck
+npm run typecheck:supabase
+npm run test:integration
+npx supabase test db
+npx supabase db lint --level warning
 ```
 
-For local development, copy `.dev.vars.example` to `.dev.vars` and populate it with development-only values. `.dev.vars` is ignored by Git.
+Tests use mock provider calls and local Postgres. They do not contact Telegram or Gemini.
 
-## Google Apps Script Telegram relay
+## Supabase configuration
 
-The Worker never calls the Telegram Bot API directly. Outbound `getMe`, `sendMessage`, `answerCallbackQuery`, and `editMessageText` requests go through the versioned relay at `relay/Code.gs`.
+The hosted project needs these Edge Function secrets:
 
-1. Create a standalone Google Apps Script project and paste in `relay/Code.gs`.
-2. In **Project Settings**, add these Script Properties with values known only to the operator: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `RELAY_SHARED_SECRET`. Use the same shared-secret value later for Cloudflare's `TELEGRAM_RELAY_SECRET`.
-3. Deploy it as a **Web app**. Set **Execute as** to **Me** and **Who has access** to **Anyone**, then copy the Web app URL. Create a new deployment after changing the source.
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `SCHEDULED_FUNCTION_SECRET`
 
-Before configuring Cloudflare, verify the relay from a terminal. Enter the URL, chat ID, and shared secret only at the prompts so none is placed in shell history. The encoder passes the secret and payload only through standard input, and the response parser never prints the Telegram response body:
+Enter secret values only through Supabase Dashboard or an interactive CLI prompt. Never put them in source files, command arguments, logs, or chat.
+
+Deploy the database and functions:
 
 ```sh
-printf 'Relay URL: '
-IFS= read -r RELAY_URL
-printf 'Telegram chat ID: '
-IFS= read -r TELEGRAM_CHAT_ID
-printf 'Relay shared secret: '
-IFS= read -rs RELAY_SHARED_SECRET
-printf '\n'
-printf '%s\0%s\0' "$RELAY_SHARED_SECRET" "$TELEGRAM_CHAT_ID" \
-  | node -e '
-      const chunks = [];
-      process.stdin.on("data", (chunk) => chunks.push(chunk));
-      process.stdin.on("end", () => {
-        const [secret, chatId] = Buffer.concat(chunks).toString("utf8").split("\0");
-        process.stdout.write(JSON.stringify({ secret, chatId, method: "getMe", body: {} }));
-      });
-    ' \
-  | curl --silent --location "$RELAY_URL" \
-      --header "content-type: application/json" \
-      --data-binary @- \
-  | node -e '
-      const chunks = [];
-      process.stdin.on("data", (chunk) => chunks.push(chunk));
-      process.stdin.on("end", () => {
-        let succeeded = false;
-        try {
-          const response = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-          succeeded = response.ok === true && response.status === 200;
-        } catch {}
-        process.stdout.write(succeeded ? "Relay getMe succeeded.\n" : "Relay getMe failed.\n");
-      });
-    '
-unset RELAY_URL TELEGRAM_CHAT_ID RELAY_SHARED_SECRET
+npx supabase db push
+npx supabase functions deploy telegram-webhook --use-api
+npx supabase functions deploy scheduled-pipeline --use-api
 ```
 
-The relay accepts only the four outbound methods listed above. Every request must carry the configured chat ID in the top-level relay envelope, and a Telegram body `chat_id`, when present, must match it.
+## Production cutover
 
-## Cloudflare setup and deployment
+Execute these checkpoints in order.
 
-Authenticate Wrangler:
+1. Run the complete local verification gate above.
+2. Apply `npx supabase db push` and deploy both functions.
+3. Inspect the old D1 database read-only with the account that owns database `8ccd410d-2733-4987-b16f-b2b53375d558`:
 
 ```sh
-npx wrangler login
+npx wrangler d1 execute DB --remote --command \
+  "SELECT 'articles' AS table_name, COUNT(*) AS row_count FROM articles UNION ALL SELECT 'drafts', COUNT(*) FROM drafts UNION ALL SELECT 'pending_drafts', COUNT(*) FROM drafts WHERE status = 'pending' UNION ALL SELECT 'approved_drafts', COUNT(*) FROM drafts WHERE status = 'approved' UNION ALL SELECT 'scheduled_runs', COUNT(*) FROM scheduled_runs UNION ALL SELECT 'daily_usage', COUNT(*) FROM daily_usage"
 ```
 
-Create the D1 database once, then copy the returned non-secret database ID into the `database_id` field in `wrangler.jsonc`:
+`D1_CUTOVER_BLOCKED`: the latest inspection returned Cloudflare error `7403` because the current Wrangler account is not authorized for that D1 database. Log in to the owning account and rerun the count. Any command failure, missing table, incomplete count, or non-zero `pending_drafts`/`approved_drafts` count is a hard stop. Do not run the smoke test, switch webhooks, or enable Cron until the inspection succeeds and any live drafts are exported and reconciled. Failed runs and diagnostics do not need migration.
+4. In Supabase Dashboard → Vault, create:
+   - `project_url`: the project origin, for example `https://PROJECT_REF.supabase.co`.
+   - `scheduled_function_secret`: the same value stored as the Edge Function secret `SCHEDULED_FUNCTION_SECRET`.
+5. Run exactly one authenticated scheduled-pipeline smoke test before enabling Cron:
 
 ```sh
-npx wrangler d1 create football-news-bot
+printf 'Scheduled function secret: '
+IFS= read -rs SCHEDULED_TEST_SECRET
+printf '\nSupabase project ref: '
+IFS= read -r SUPABASE_PROJECT_REF
+printf '%s\0%s\0' "$SCHEDULED_TEST_SECRET" "$SUPABASE_PROJECT_REF" \
+  | node scripts/smoke-scheduled-pipeline.mjs
+unset SCHEDULED_TEST_SECRET SUPABASE_PROJECT_REF
 ```
 
-Apply the migration to the remote database:
+The expected status is `no_candidate` or `draft_sent`. `draft_sent` must correspond to one Postgres run, article, draft, and quota reservation.
+
+6. Register Telegram directly to Supabase. The shell built-in sends credentials to the helper over stdin; secrets never appear in a child process argument list:
 
 ```sh
-npx wrangler d1 migrations apply DB --remote
+printf 'Telegram bot token: '
+IFS= read -rs TELEGRAM_SETUP_TOKEN
+printf '\nTelegram webhook secret: '
+IFS= read -rs TELEGRAM_SETUP_SECRET
+printf '\nSupabase project ref: '
+IFS= read -r SUPABASE_PROJECT_REF
+printf '%s\0%s\0%s\0' \
+  "$TELEGRAM_SETUP_TOKEN" "$TELEGRAM_SETUP_SECRET" "$SUPABASE_PROJECT_REF" \
+  | node scripts/configure-telegram-webhook.mjs
+unset TELEGRAM_SETUP_TOKEN TELEGRAM_SETUP_SECRET SUPABASE_PROJECT_REF
 ```
 
-Set the seven Cloudflare runtime secrets. Set `TELEGRAM_RELAY_SECRET` to the same value held by Apps Script as `RELAY_SHARED_SECRET`; the Telegram bot token is not a Cloudflare secret:
+Verify the Supabase URL, zero pending updates, and no recent delivery error. Approve one controlled draft and confirm its Postgres status becomes `approved`.
 
-```sh
-npx wrangler secret put TELEGRAM_RELAY_URL
-npx wrangler secret put TELEGRAM_RELAY_SECRET
-npx wrangler secret put TELEGRAM_CHAT_ID
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-npx wrangler secret put DIAGNOSTIC_SECRET
-npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put GEMINI_MODEL
-```
+7. Disable the Cloudflare Cron trigger in Cloudflare Dashboard. Do not delete D1.
+8. Run `supabase/ops/configure-cron.sql` in Supabase SQL Editor.
+9. Run `supabase/ops/verify-cron.sql`. It raises an exception unless exactly one active job named `football-news-pipeline` uses `7 1,4,7,10,13 * * *` and performs the required Vault lookups.
+10. After the first scheduled invocation, open Supabase Dashboard → Edge Functions → scheduled-pipeline → Logs. Require an HTTP 2xx invocation and a matching terminal row in `scheduled_runs`. A `succeeded` row in `cron.job_run_details` only proves that `pg_net` accepted the HTTP request; it does not prove the Edge Function returned 2xx.
 
-Review the versioned `RSS_FEEDS_JSON` value in `wrangler.jsonc`. It is public configuration and remains directly editable. It initially contains verified RSS endpoints for BBC Sport Football, Sky Sports Football, and Liverpool FC; remove or replace a source if it stops returning RSS/Atom.
+The schedule is `01:07`, `04:07`, `07:07`, `10:07`, and `13:07` UTC, corresponding to `08:07`, `11:07`, `14:07`, `17:07`, and `20:07` in `Asia/Ho_Chi_Minh`.
 
-Validate the bundle without changing remote state, then deploy only after reviewing the configuration:
+## Rollback
 
-```sh
-npx wrangler deploy --dry-run
-npx wrangler deploy
-```
+Run `supabase/ops/disable-cron.sql` first. Restore the previous Telegram webhook only if its transport is known to work, then re-enable Cloudflare Cron. Never leave both schedulers enabled. Do not delete D1 during rollback.
 
-Run the relay health diagnostic after deployment. It sends `getMe` through the relay, does not call Gemini, and does not return bot details:
+## Operations and safety
 
-```sh
-curl "https://<WORKER_HOST>/internal/telegram-health" \
-  --header "X-Diagnostic-Secret: <DIAGNOSTIC_SECRET>" \
-  --data ''
-```
-
-After the deployment and relay health check pass, remove any legacy Cloudflare bot-token secret. This is required even if the current Worker version no longer binds it:
-
-```sh
-npx wrangler secret delete TELEGRAM_BOT_TOKEN
-```
-
-## Telegram webhook
-
-The Worker accepts `POST /telegram` for callbacks. It verifies Telegram's secret header, configured chat ID, and stored Telegram message ID before changing a draft. Approval and rejection callbacks use compact `a:<draft-id>` and `r:<draft-id>` payloads. The separate temporary route `POST /internal/telegram-health` requires `DIAGNOSTIC_SECRET`.
-
-Register or update the Telegram callback webhook through the operator-controlled Telegram configuration; it must target `https://<WORKER_HOST>/telegram`, use `TELEGRAM_WEBHOOK_SECRET`, and allow only `callback_query` updates. Do not route this setup through Cloudflare or record credential-bearing commands.
-
-## Operations
-
-Stream structured Worker logs without exposing request bodies or secrets:
-
-```sh
-npx wrangler tail
-```
-
-The Cron expression in `wrangler.jsonc` runs at `01:07`, `04:07`, `07:07`, `10:07`, and `13:07` UTC, corresponding to `08:07`, `11:07`, `14:07`, `17:07`, and `20:07` in `Asia/Ho_Chi_Minh`. D1 prevents duplicate slots and URLs, and caps Gemini reservations at five per Vietnam calendar date.
-
-Historical D1 pruning is deferred in this MVP. Approval records remain intact; define and review a retention policy before adding deletion logic.
-
-Use `npx wrangler secret delete <SECRET_NAME>` only when deliberately rotating or decommissioning a secret.
+- Use only configured public RSS/Atom endpoints; do not scrape article pages.
+- Postgres enforces unique slots, unique canonical URLs, terminal draft decisions, and at most five Gemini reservations per Vietnam date.
+- Logs contain bounded categories and identifiers, never secrets, Telegram request bodies, article excerpts, or Gemini prompts.
+- Supabase Free has no uptime SLA and may impose platform limits; the five daily jobs are designed to remain lightweight.
