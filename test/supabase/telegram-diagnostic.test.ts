@@ -4,14 +4,22 @@ import { createTelegramDiagnosticHandler } from "../../supabase/functions/telegr
 const ENV = new Map([
   ["TELEGRAM_BOT_TOKEN", "test-token"],
   ["TELEGRAM_CHAT_ID", "1331364954"],
+  ["TELEGRAM_WEBHOOK_SECRET", "webhook-test-secret"],
   ["SCHEDULED_FUNCTION_SECRET", "scheduled-test-secret"],
+  ["SUPABASE_URL", "https://project.supabase.co"],
 ]);
 
 function request(
-  operation: "getMe" | "sendMessage",
+  operation:
+    | "getMe"
+    | "sendMessage"
+    | "sendWebhookProbe"
+    | "getWebhookInfo"
+    | "setWebhook",
   secret = "scheduled-test-secret",
+  url = "https://project.supabase.co/functions/v1/telegram-diagnostic",
 ): Request {
-  return new Request("https://project.supabase.co/functions/v1/telegram-diagnostic", {
+  return new Request(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -81,6 +89,87 @@ describe("Telegram diagnostic handler", () => {
     await expect(response.json()).resolves.toEqual({
       status: "ok",
       operation: "sendMessage",
+    });
+  });
+
+  it("sends a webhook probe without returning its message identifier", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: {
+        message_id: 78,
+        date: 1_786_357_502,
+        text: "Tap the button to verify Telegram → Supabase webhook delivery.",
+        chat: { id: 1_331_364_954, type: "private" },
+      },
+    }));
+    const handler = createTelegramDiagnosticHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+    });
+
+    const response = await handler(request("sendWebhookProbe"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      status: "ok",
+      operation: "sendWebhookProbe",
+    });
+  });
+
+  it("returns only safe webhook routing fields", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: {
+        url: "https://old.example/telegram",
+        has_custom_certificate: false,
+        pending_update_count: 2,
+        last_error_message: "provider detail must not escape",
+      },
+    }));
+    const handler = createTelegramDiagnosticHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+    });
+
+    const response = await handler(request("getWebhookInfo"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      status: "ok",
+      operation: "getWebhookInfo",
+      webhook: {
+        url: "https://old.example/telegram",
+        pendingUpdateCount: 2,
+      },
+    });
+  });
+
+  it("sets only the sibling Supabase webhook URL", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: true,
+    }));
+    const handler = createTelegramDiagnosticHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+    });
+
+    const response = await handler(request(
+      "setWebhook",
+      "scheduled-test-secret",
+      "http://internal-runtime/telegram-diagnostic",
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      status: "ok",
+      operation: "setWebhook",
+    });
+    const [, init] = fetcher.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toEqual({
+      url: "https://project.supabase.co/functions/v1/telegram-webhook",
+      secret_token: "webhook-test-secret",
+      allowed_updates: ["callback_query"],
     });
   });
 });

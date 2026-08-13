@@ -1,10 +1,17 @@
 const REQUEST_TIMEOUT_MS = 8_000;
 const TELEGRAM_API_ROOT = "https://api.telegram.org";
 const DIAGNOSTIC_TEXT = "Supabase Telegram diagnostic succeeded.";
+const WEBHOOK_PROBE_TEXT =
+  "Tap the button to verify Telegram → Supabase webhook delivery.";
 
 export interface DirectTelegramConfig {
   botToken: string;
   chatId: string;
+}
+
+export interface TelegramWebhookInfo {
+  url: string;
+  pendingUpdateCount: number;
 }
 
 interface TelegramResponse {
@@ -33,6 +40,48 @@ export class TelegramClient {
       throw new Error("telegram_invalid_response");
     }
     return messageId;
+  }
+
+  async sendWebhookProbe(): Promise<number> {
+    const response = await this.request("sendMessage", {
+      chat_id: this.config.chatId,
+      text: WEBHOOK_PROBE_TEXT,
+      reply_markup: {
+        inline_keyboard: [[{
+          text: "Test Supabase webhook",
+          callback_data: "v:1",
+        }]],
+      },
+    });
+    const messageId = getMessageId(response.result);
+    if (messageId === null) {
+      throw new Error("telegram_invalid_response");
+    }
+    return messageId;
+  }
+
+  async answerCallback(callbackQueryId: string, text: string): Promise<void> {
+    await this.request("answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      text,
+    });
+  }
+
+  async getWebhookInfo(): Promise<TelegramWebhookInfo> {
+    const response = await this.request("getWebhookInfo", {});
+    const info = parseWebhookInfo(response.result);
+    if (info === null) {
+      throw new Error("telegram_invalid_response");
+    }
+    return info;
+  }
+
+  async setWebhook(webhookUrl: string, webhookSecret: string): Promise<void> {
+    await this.request("setWebhook", {
+      url: webhookUrl,
+      secret_token: webhookSecret,
+      allowed_updates: ["callback_query"],
+    });
   }
 
   private async request(
@@ -98,6 +147,25 @@ function getMessageId(value: unknown): number | null {
     return null;
   }
   return value.message_id;
+}
+
+function parseWebhookInfo(value: unknown): TelegramWebhookInfo | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("url" in value) ||
+    typeof value.url !== "string" ||
+    !("pending_update_count" in value) ||
+    typeof value.pending_update_count !== "number" ||
+    !Number.isSafeInteger(value.pending_update_count) ||
+    value.pending_update_count < 0
+  ) {
+    return null;
+  }
+  return {
+    url: value.url,
+    pendingUpdateCount: value.pending_update_count,
+  };
 }
 
 function isTimeout(error: unknown): boolean {

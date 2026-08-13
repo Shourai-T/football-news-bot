@@ -9,7 +9,12 @@ export interface DiagnosticDependencies {
   fetcher: typeof fetch;
 }
 
-type DiagnosticOperation = "getMe" | "sendMessage";
+type DiagnosticOperation =
+  | "getMe"
+  | "sendMessage"
+  | "sendWebhookProbe"
+  | "getWebhookInfo"
+  | "setWebhook";
 
 export function createTelegramDiagnosticHandler(
   dependencies: DiagnosticDependencies,
@@ -65,8 +70,29 @@ export function createTelegramDiagnosticHandler(
     try {
       if (operation === "getMe") {
         await telegram.checkHealth();
-      } else {
+      } else if (operation === "sendMessage") {
         await telegram.sendDiagnostic();
+      } else if (operation === "sendWebhookProbe") {
+        await telegram.sendWebhookProbe();
+      } else if (operation === "getWebhookInfo") {
+        const webhook = await telegram.getWebhookInfo();
+        return Response.json({ status: "ok", operation, webhook });
+      } else {
+        let webhookSecret: string;
+        let supabaseUrl: string;
+        try {
+          webhookSecret = readRequiredEnv(
+            "TELEGRAM_WEBHOOK_SECRET",
+            dependencies.readEnv,
+          );
+          supabaseUrl = readRequiredEnv("SUPABASE_URL", dependencies.readEnv);
+        } catch {
+          return Response.json({ status: "misconfigured" }, { status: 500 });
+        }
+        await telegram.setWebhook(
+          buildWebhookUrl(supabaseUrl),
+          webhookSecret,
+        );
       }
       return Response.json({ status: "ok", operation });
     } catch (error) {
@@ -84,8 +110,26 @@ function isDiagnosticPayload(
   return typeof value === "object" &&
     value !== null &&
     "operation" in value &&
-    (value.operation === "getMe" || value.operation === "sendMessage") &&
+    (value.operation === "getMe" ||
+      value.operation === "sendMessage" ||
+      value.operation === "sendWebhookProbe" ||
+      value.operation === "getWebhookInfo" ||
+      value.operation === "setWebhook") &&
     Object.keys(value).length === 1;
+}
+
+function buildWebhookUrl(supabaseUrl: string): string {
+  const url = new URL(supabaseUrl);
+  if (
+    url.protocol !== "https:" ||
+    !url.hostname.endsWith(".supabase.co")
+  ) {
+    throw new Error("invalid_supabase_url");
+  }
+  url.pathname = "/functions/v1/telegram-webhook";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
 }
 
 function errorCategory(error: unknown): string {

@@ -299,6 +299,26 @@ Operator actions:
 
 Expected: both calls return generic HTTP 200 responses and Telegram receives exactly one diagnostic message. If either call fails, stop the entire migration and do not add a relay.
 
+- [ ] **Step 10: Prove inbound Telegram callback delivery**
+
+Before starting Task 2, extend the diagnostic client with a controlled
+`sendWebhookProbe` operation and deploy a temporary minimal
+`telegram-webhook` handler. The probe message contains exactly one
+`callback_data: "v:1"` button. The webhook must validate
+`X-Telegram-Bot-Api-Secret-Token`, the configured private chat, and the exact
+probe callback before calling Telegram `answerCallbackQuery`. It performs no
+database mutation and no Gemini request.
+
+Run the focused webhook tests first, then deploy both functions. Record the
+current Telegram webhook URL, register the Supabase webhook with
+`allowed_updates=["callback_query"]`, send the controlled probe, and click the
+button once. Confirm the callback acknowledgement and inspect sanitized Edge
+Function logs. Restore the recorded webhook URL if any inbound check fails.
+
+Expected: Telegram displays `Supabase webhook received.`, the Supabase webhook
+log shows one successful request without request bodies or credentials, and
+only then may Task 2 begin.
+
 ---
 
 ### Task 2: Postgres schema and transactional invariants

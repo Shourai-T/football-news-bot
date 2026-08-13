@@ -55,6 +55,97 @@ describe("direct Telegram client", () => {
     });
   });
 
+  it("sends one controlled webhook probe button to the configured chat", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: {
+        message_id: 78,
+        date: 1_786_357_502,
+        text: "Tap the button to verify Telegram → Supabase webhook delivery.",
+        chat: { id: 1_331_364_954, type: "private" },
+      },
+    }));
+    const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
+
+    await expect(client.sendWebhookProbe()).resolves.toBe(78);
+
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe("https://api.telegram.org/bottest-token/sendMessage");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      chat_id: "1331364954",
+      text: "Tap the button to verify Telegram → Supabase webhook delivery.",
+      reply_markup: {
+        inline_keyboard: [[{
+          text: "Test Supabase webhook",
+          callback_data: "v:1",
+        }]],
+      },
+    });
+  });
+
+  it("answers the controlled webhook callback without a relay", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: true,
+    }));
+    const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
+
+    await client.answerCallback(
+      "callback-query-1",
+      "Supabase webhook received.",
+    );
+
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe(
+      "https://api.telegram.org/bottest-token/answerCallbackQuery",
+    );
+    expect(JSON.parse(String(init?.body))).toEqual({
+      callback_query_id: "callback-query-1",
+      text: "Supabase webhook received.",
+    });
+  });
+
+  it("reads only the safe webhook routing fields", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: {
+        url: "https://old.example/telegram",
+        has_custom_certificate: false,
+        pending_update_count: 2,
+        last_error_message: "provider detail must not escape",
+      },
+    }));
+    const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
+
+    await expect(client.getWebhookInfo()).resolves.toEqual({
+      url: "https://old.example/telegram",
+      pendingUpdateCount: 2,
+    });
+  });
+
+  it("configures the direct webhook with only callback query updates", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: true,
+    }));
+    const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
+
+    await client.setWebhook(
+      "https://project.supabase.co/functions/v1/telegram-webhook",
+      "webhook-test-secret",
+    );
+
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe(
+      "https://api.telegram.org/bottest-token/setWebhook",
+    );
+    expect(JSON.parse(String(init?.body))).toEqual({
+      url: "https://project.supabase.co/functions/v1/telegram-webhook",
+      secret_token: "webhook-test-secret",
+      allowed_updates: ["callback_query"],
+    });
+  });
+
   it("reports a sanitized API category without Telegram response text", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(
       { ok: false, error_code: 401, description: "secret provider detail" },
