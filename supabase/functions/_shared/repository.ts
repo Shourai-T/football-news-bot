@@ -28,7 +28,7 @@ export interface BotRepository {
     decision: DraftDecision,
     now: Date,
   ): Promise<DraftStatus | null>;
-  markDraftFailed(draftId: number): Promise<void>;
+  markDraftFailed(draftId: number): Promise<boolean>;
   completeRun(
     slotKey: string,
     outcome: TerminalRunOutcome,
@@ -214,14 +214,18 @@ export class SupabaseBotRepository implements BotRepository {
     }
   }
 
-  async markDraftFailed(draftId: number): Promise<void> {
+  async markDraftFailed(draftId: number): Promise<boolean> {
     try {
-      const { error } = await this.client
+      const { data, error } = await this.client
         .from("drafts")
         .update({ status: "failed" })
         .eq("id", draftId)
-        .eq("status", "pending");
+        .eq("status", "pending")
+        .is("telegram_message_id", null)
+        .select("id")
+        .maybeSingle();
       if (error) throwRepositoryError("mark_draft_failed");
+      return data !== null;
     } catch (error) {
       rethrowRepositoryError(error, "mark_draft_failed");
     }

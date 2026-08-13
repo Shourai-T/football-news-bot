@@ -142,7 +142,8 @@ describe("Supabase bot repository", () => {
       NOW,
     );
 
-    await repository.markDraftFailed(draftId);
+    await expect(repository.markDraftFailed(draftId)).resolves.toBe(true);
+    await expect(repository.markDraftFailed(draftId)).resolves.toBe(false);
 
     await expect(repository.getDraftForCallback(draftId)).resolves.toEqual({
       body: "A draft that Telegram did not receive.",

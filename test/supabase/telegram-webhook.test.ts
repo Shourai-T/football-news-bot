@@ -258,7 +258,7 @@ class MemoryRepository implements BotRepository {
   setDraftTelegramMessage(_draftId: number, _messageId: number): Promise<boolean> {
     return Promise.reject(new Error("unexpected_set_message"));
   }
-  markDraftFailed(_draftId: number): Promise<void> {
+  markDraftFailed(_draftId: number): Promise<boolean> {
     return Promise.reject(new Error("unexpected_mark_failed"));
   }
   completeRun(
