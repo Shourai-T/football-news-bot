@@ -2,6 +2,13 @@ import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-worker
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  test: {
+    exclude: [
+      "**/node_modules/**",
+      "**/.git/**",
+      "test/supabase/**/*.integration.test.ts",
+    ],
+  },
   plugins: [
     cloudflareTest(async () => ({
       miniflare: {

@@ -11,6 +11,7 @@
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "test:db": "supabase test db",
+    "test:integration": "node scripts/run-supabase-integration-tests.mjs",
     "test:supabase": "vitest run test/supabase",
     "typecheck:supabase": "tsc --noEmit -p tsconfig.supabase.json"
   },
