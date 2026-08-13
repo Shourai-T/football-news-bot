@@ -8,6 +8,23 @@ export interface Article {
   topicScore: number;
 }
 
+export interface FeedDefinition {
+  name: string;
+  url: string;
+  priority: number;
+}
+
+export interface GeminiConfig {
+  apiKey: string;
+  model: string;
+}
+
+export interface TelegramDraft {
+  id: number;
+  body: string;
+  canonicalUrl: string;
+}
+
 export type DraftStatus = "pending" | "approved" | "rejected" | "failed";
 export type DraftDecision = Extract<DraftStatus, "approved" | "rejected">;
 
