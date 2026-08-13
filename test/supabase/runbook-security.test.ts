@@ -28,11 +28,11 @@ describe("Supabase cutover runbook", () => {
     expect(readme).toContain("HTTP 2xx");
   });
 
-  it("fails smoke checks closed and bounds external requests to eight seconds", () => {
+  it("fails smoke checks closed and allows the whole pipeline to finish", () => {
     expect(smokeHelper).toContain('["no_candidate", "draft_sent"]');
     expect(smokeHelper).toContain("unexpected_status");
-    expect(smokeHelper).toContain("AbortSignal.timeout(8_000)");
-    expect(smokeHelper).not.toContain("30_000");
+    expect(smokeHelper).toContain("AbortSignal.timeout(160_000)");
+    expect(smokeHelper).not.toContain("AbortSignal.timeout(8_000)");
   });
 
   it("rejects pending updates and recent Telegram delivery errors", () => {

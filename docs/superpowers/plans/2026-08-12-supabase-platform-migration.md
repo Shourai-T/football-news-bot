@@ -18,7 +18,7 @@
 - Do not delete the remote D1 database. Inspect and reconcile its row counts before cutover.
 - Do not introduce X credentials, OAuth, credits, or publishing calls in this migration.
 - Never place secret values in Git, command arguments, shell history, logs, test fixtures, or chat. Enter hosted secrets through the Supabase dashboard.
-- Keep every external request timeout at 8 seconds or less; keep an entire pipeline invocation below the Supabase Free 150-second wall-clock limit.
+- Keep each provider request from an Edge Function at 8 seconds or less; keep an entire pipeline invocation below the Supabase Free 150-second wall-clock limit. The operator smoke client may wait up to 160 seconds so the platform ceiling, not the client, determines the terminal outcome.
 - Keep public tables behind RLS with no public policies. Edge Functions access them only through the project secret key.
 - Docker Desktop is installed but its daemon is currently stopped; start it before local Supabase integration tests.
 - Deno is not currently installed; install Deno 2.9 or newer through Homebrew only after the operator approves that machine-level change.

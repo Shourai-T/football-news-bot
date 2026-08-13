@@ -91,7 +91,7 @@ printf '%s\0%s\0' "$SCHEDULED_TEST_SECRET" "$SUPABASE_PROJECT_REF" \
 unset SCHEDULED_TEST_SECRET SUPABASE_PROJECT_REF
 ```
 
-The expected status is `no_candidate` or `draft_sent`. `draft_sent` must correspond to one Postgres run, article, draft, and quota reservation.
+The helper waits up to 160 seconds for the complete multi-provider pipeline, ten seconds beyond the Supabase Free 150-second function ceiling. Each individual provider call inside the Edge Function remains capped at 8 seconds. The expected status is `no_candidate` or `draft_sent`. `draft_sent` must correspond to one Postgres run, article, draft, and quota reservation.
 
 6. Register Telegram directly to Supabase. The shell built-in sends credentials to the helper over stdin; secrets never appear in a child process argument list:
 

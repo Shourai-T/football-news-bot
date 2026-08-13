@@ -14,7 +14,7 @@ try {
       },
       body: "{}",
       redirect: "error",
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(160_000),
     },
   );
 } catch {
