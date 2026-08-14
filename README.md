@@ -17,6 +17,10 @@ Supabase Cron (5 slots/day)
 Telegram callback
   -> telegram-webhook Edge Function
   -> Postgres approved / rejected state
+
+Telegram /xmode command
+  -> telegram-webhook Edge Function
+  -> Postgres X posting mode setting
 ```
 
 Supabase is the only active runtime in this repository.
@@ -130,7 +134,64 @@ printf '%s\0%s\0%s\0' \
 unset TELEGRAM_SETUP_TOKEN TELEGRAM_SETUP_SECRET SUPABASE_PROJECT_REF
 ```
 
-The helper fails closed if Telegram reports pending updates or a recent delivery error. Approve one controlled draft and confirm its Postgres status becomes `approved` before relying on scheduled execution.
+The helper fails closed if Telegram reports pending updates or a recent delivery error. It registers both `message` updates for `/xmode` and `callback_query` updates for inline controls. Approve one controlled draft and confirm its Postgres status becomes `approved` before relying on scheduled execution.
+
+## X posting mode control
+
+Send this command to the bot from the private chat configured by
+`TELEGRAM_CHAT_ID`:
+
+```text
+/xmode
+```
+
+The bot must return:
+
+```text
+X posting mode: OFF
+
+[OFF ✓] [MANUAL 🔒] [AUTO 🔒]
+```
+
+The setting is stored in `public.bot_settings` and survives Edge Function
+deployments. This phase deliberately permits only `OFF`:
+
+- `OFF ✓` is idempotent and also acts as the emergency stop if a future mode
+  is ever stored.
+- `MANUAL 🔒` is reserved for the later `Approve → Open in X` phase.
+- `AUTO 🔒` remains unavailable until X API posting, idempotency, durable
+  attempt history, and reconciliation exist.
+
+Until those modes are implemented, `/xmode` also normalizes any manually
+stored `manual` or `auto` value back to `off` before displaying the panel.
+
+Do not interpret an approved Telegram draft as an X post. Approval remains a
+database decision only while the mode is `OFF`.
+
+After applying migrations, verify the singleton before deploying the webhook:
+
+```sql
+select id, x_posting_mode, updated_at
+from public.bot_settings
+where id = 1;
+```
+
+Stop the deployment if the query does not return exactly one row with
+`id = 1` and `x_posting_mode = 'off'`.
+
+Release verification order:
+
+1. Run `npx supabase db push`.
+2. Verify the singleton query above returns exactly `OFF`.
+3. Run `npx supabase functions deploy telegram-webhook --use-api`.
+4. Re-run `scripts/configure-telegram-webhook.mjs` through the stdin-only flow
+   above so Telegram sends both required update types.
+5. Send `/xmode` in the configured private chat.
+6. Require `OFF ✓`, `MANUAL 🔒`, and `AUTO 🔒` in the returned panel.
+7. Press all three buttons and verify `public.bot_settings.x_posting_mode`
+   remains `off`.
+8. Approve one controlled draft and confirm the existing `approved` transition
+   remains unchanged.
 
 ## Manual pipeline invocation
 
@@ -182,6 +243,10 @@ Logs must contain bounded categories and identifiers only. Never log Telegram pa
 4. Re-run one controlled smoke test and callback before restoring Cron with `supabase/ops/configure-cron.sql`.
 
 Never enable two schedulers for the same five slots.
+
+When rolling the webhook back to a version before `/xmode`, re-register it
+with only `callback_query` in `allowed_updates`. Keep `public.bot_settings` at
+`off`; do not drop the table as part of rollback.
 
 ## Retired infrastructure cleanup
 
