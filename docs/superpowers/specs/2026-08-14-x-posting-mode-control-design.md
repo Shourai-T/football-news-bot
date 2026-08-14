@@ -47,6 +47,9 @@ X posting mode: OFF
 Behavior:
 
 - Pressing `OFF ✓` answers `Already OFF` and leaves the stored setting unchanged.
+- If a future mode is ever present, pressing `OFF` durably changes it to `off`
+  before refreshing the panel. A later Telegram failure must not roll back this
+  emergency stop.
 - Pressing `MANUAL 🔒` answers `Manual mode is coming soon` and leaves the setting unchanged.
 - Pressing `AUTO 🔒` answers `Auto mode is not configured` and leaves the setting unchanged.
 - Commands and callbacks from any other chat are rejected without reading or mutating settings.
@@ -125,7 +128,8 @@ Owns authentication, update routing, availability policy, and orchestration. It 
 - Invalid webhook secret: `401`, before database or Telegram provider access.
 - Invalid or foreign-chat update: `400` or `403`, with no setting mutation.
 - Settings read failure: `500 database_error`; do not render an invented mode.
-- Telegram panel send or callback-answer failure: `502 provider_error`; do not alter the setting.
+- Initial Telegram panel send failure: `502 provider_error`; no setting mutation has occurred.
+- Telegram failure after a successful transition to `off`: `502 provider_error`; retain the durable `off` setting.
 - Locked-mode callback: return `200` after answering the callback; do not write to Supabase.
 - Repeated `off` callback: idempotent, with no database write.
 
