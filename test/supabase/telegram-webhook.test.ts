@@ -210,6 +210,32 @@ describe("Supabase Telegram approval webhook", () => {
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
+  it("normalizes a locked stored mode to OFF before rendering", async () => {
+    const repository = new MemoryRepository();
+    repository.xPostingMode = "auto";
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: { message_id: 500 },
+    }));
+    const now = new Date("2026-08-14T05:00:00.000Z");
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+      now: () => now,
+    });
+
+    const response = await handler(messageRequest("/xmode"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok", mode: "off" });
+    expect(repository.xPostingMode).toBe("off");
+    expect(repository.modeWrites).toEqual([{ mode: "off", now }]);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+      text: "X posting mode: OFF",
+    });
+  });
+
   it("ignores ordinary messages without reading settings", async () => {
     const repository = new MemoryRepository();
     const fetcher = vi.fn<typeof fetch>();

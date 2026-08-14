@@ -87,6 +87,9 @@ export function createTelegramWebhookHandler(
       let mode;
       try {
         mode = await dependencies.repository.getXPostingMode();
+        if (mode !== "off") {
+          mode = await dependencies.repository.setXPostingMode("off", now());
+        }
       } catch {
         return Response.json({ status: "database_error" }, { status: 500 });
       }

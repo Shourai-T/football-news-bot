@@ -55,6 +55,8 @@ Behavior:
 - Commands and callbacks from any other chat are rejected without reading or mutating settings.
 - Non-command messages are ignored.
 - Existing draft callbacks `a:<draft-id>` and `r:<draft-id>` retain their current behavior.
+- Until a future mode is unlocked in code, `/xmode` normalizes any stored
+  `manual` or `auto` value back to `off` before rendering the panel.
 
 Telegram callback data stays compact:
 
