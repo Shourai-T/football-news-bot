@@ -2,7 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createAdminClient } from "../../supabase/functions/_shared/database-client";
 import type { Database } from "../../supabase/functions/_shared/database.types";
-import type { Article } from "../../supabase/functions/_shared/domain-types";
+import type {
+  Article,
+  XPostingMode,
+} from "../../supabase/functions/_shared/domain-types";
 import { SupabaseBotRepository } from "../../supabase/functions/_shared/repository";
 
 const NOW = new Date("2026-08-12T01:07:00.000Z");
@@ -25,6 +28,14 @@ const client = createAdminClient(readEnv);
 const repository = new SupabaseBotRepository(client);
 
 beforeEach(async () => {
+  const { error: settingsError } = await client
+    .from("bot_settings")
+    .update({
+      x_posting_mode: "off",
+      updated_at: NOW.toISOString(),
+    })
+    .eq("id", 1);
+  if (settingsError) throw new Error("integration_cleanup_failed:bot_settings");
   await deleteAll(client, "drafts", "id");
   await deleteAll(client, "articles", "id");
   await deleteAll(client, "scheduled_runs", "slot_key");
@@ -32,6 +43,25 @@ beforeEach(async () => {
 });
 
 describe("Supabase bot repository", () => {
+  it("reads and durably changes the singleton X posting mode", async () => {
+    await expect(repository.getXPostingMode()).resolves.toBe("off");
+
+    const changedAt = new Date("2026-08-12T01:10:00.000Z");
+    await expect(repository.setXPostingMode("manual", changedAt)).resolves.toBe(
+      "manual",
+    );
+    await expect(repository.getXPostingMode()).resolves.toBe("manual");
+
+    const { data, error } = await client
+      .from("bot_settings")
+      .select("x_posting_mode,updated_at")
+      .eq("id", 1)
+      .single();
+    expect(error).toBeNull();
+    expect(data?.x_posting_mode).toBe("manual" satisfies XPostingMode);
+    expect(new Date(data!.updated_at).getTime()).toBe(changedAt.getTime());
+  });
+
   it("starts each scheduled slot at most once and completes it once", async () => {
     const slotKey = "2026-08-12T01:07Z";
 

@@ -6,6 +6,7 @@ import type {
   DraftStatus,
   StoredDraft,
   TerminalRunOutcome,
+  XPostingMode,
 } from "./domain-types.ts";
 
 const URL_LOOKUP_BATCH_SIZE = 100;
@@ -35,6 +36,11 @@ export interface BotRepository {
     errorSummary: string | null,
     now: Date,
   ): Promise<boolean>;
+}
+
+export interface XPostingModeRepository {
+  getXPostingMode(): Promise<XPostingMode>;
+  setXPostingMode(mode: XPostingMode, now: Date): Promise<XPostingMode>;
 }
 
 export class SupabaseBotRepository implements BotRepository {
@@ -255,6 +261,41 @@ export class SupabaseBotRepository implements BotRepository {
       rethrowRepositoryError(error, "complete_run");
     }
   }
+
+  async getXPostingMode(): Promise<XPostingMode> {
+    try {
+      const { data, error } = await this.client
+        .from("bot_settings")
+        .select("x_posting_mode")
+        .eq("id", 1)
+        .single();
+      if (error || data === null) throwRepositoryError("get_x_posting_mode");
+      return requireXPostingMode(data.x_posting_mode, "get_x_posting_mode");
+    } catch (error) {
+      rethrowRepositoryError(error, "get_x_posting_mode");
+    }
+  }
+
+  async setXPostingMode(
+    mode: XPostingMode,
+    now: Date,
+  ): Promise<XPostingMode> {
+    try {
+      const { data, error } = await this.client
+        .from("bot_settings")
+        .update({
+          x_posting_mode: mode,
+          updated_at: now.toISOString(),
+        })
+        .eq("id", 1)
+        .select("x_posting_mode")
+        .single();
+      if (error || data === null) throwRepositoryError("set_x_posting_mode");
+      return requireXPostingMode(data.x_posting_mode, "set_x_posting_mode");
+    } catch (error) {
+      rethrowRepositoryError(error, "set_x_posting_mode");
+    }
+  }
 }
 
 function chunkCanonicalUrls(canonicalUrls: readonly string[]): string[][] {
@@ -290,6 +331,14 @@ function isDraftStatus(value: unknown): value is DraftStatus {
     value === "approved" ||
     value === "rejected" ||
     value === "failed";
+}
+
+function requireXPostingMode(
+  value: unknown,
+  operation: string,
+): XPostingMode {
+  if (value === "off" || value === "manual" || value === "auto") return value;
+  throwRepositoryError(operation);
 }
 
 function requireId(value: unknown, operation: string): number {

@@ -27,6 +27,7 @@ export interface TelegramDraft {
 
 export type DraftStatus = "pending" | "approved" | "rejected" | "failed";
 export type DraftDecision = Extract<DraftStatus, "approved" | "rejected">;
+export type XPostingMode = "off" | "manual" | "auto";
 
 export type TerminalRunOutcome =
   | "no_candidate"

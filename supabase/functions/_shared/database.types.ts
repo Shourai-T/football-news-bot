@@ -34,6 +34,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      bot_settings: {
+        Row: {
+          id: number
+          updated_at: string
+          x_posting_mode: string
+        }
+        Insert: {
+          id: number
+          updated_at: string
+          x_posting_mode: string
+        }
+        Update: {
+          id?: number
+          updated_at?: string
+          x_posting_mode?: string
+        }
+        Relationships: []
+      }
       articles: {
         Row: {
           canonical_url: string
