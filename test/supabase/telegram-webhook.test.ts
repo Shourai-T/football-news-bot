@@ -5,6 +5,7 @@ import type {
   DraftStatus,
   StoredDraft,
   TerminalRunOutcome,
+  XPostingMode,
 } from "../../supabase/functions/_shared/domain-types";
 import type { BotRepository } from "../../supabase/functions/_shared/repository";
 import { createTelegramWebhookHandler } from "../../supabase/functions/telegram-webhook/handler";
@@ -44,6 +45,28 @@ function callbackRequest(
             type: "private",
           },
         },
+      },
+    }),
+  });
+}
+
+function messageRequest(
+  text: string,
+  chatId = 1_331_364_954,
+  secret = "webhook-test-secret",
+): Request {
+  return new Request("https://project.supabase.co/functions/v1/telegram-webhook", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "X-Telegram-Bot-Api-Secret-Token": secret,
+    },
+    body: JSON.stringify({
+      update_id: 101,
+      message: {
+        message_id: 499,
+        text,
+        chat: { id: chatId, type: "private" },
       },
     }),
   });
@@ -132,6 +155,259 @@ describe("Supabase Telegram approval webhook", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("renders the durable X mode for an authorized /xmode command", async () => {
+    const repository = new MemoryRepository();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: { message_id: 500 },
+    }));
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(messageRequest("/xmode"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok", mode: "off" });
+    expect(repository.modeReads).toBe(1);
+    expect(repository.modeWrites).toEqual([]);
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe("https://api.telegram.org/bottest-token/sendMessage");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      chat_id: "1331364954",
+      text: "X posting mode: OFF",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "OFF ✓", callback_data: "xm:off" },
+          { text: "MANUAL 🔒", callback_data: "xm:manual" },
+          { text: "AUTO 🔒", callback_data: "xm:auto" },
+        ]],
+      },
+    });
+  });
+
+  it("accepts Telegram's bot-qualified /xmode command", async () => {
+    const repository = new MemoryRepository();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: { message_id: 500 },
+    }));
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(messageRequest(
+      "/xmode@football_news_approval_bot",
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok", mode: "off" });
+    expect(repository.modeReads).toBe(1);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("ignores ordinary messages without reading settings", async () => {
+    const repository = new MemoryRepository();
+    const fetcher = vi.fn<typeof fetch>();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(messageRequest("hello"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ignored" });
+    expect(repository.modeReads).toBe(0);
+    expect(repository.modeWrites).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects a foreign /xmode command without reading settings", async () => {
+    const repository = new MemoryRepository();
+    const fetcher = vi.fn<typeof fetch>();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(messageRequest("/xmode", 999));
+
+    expect(response.status).toBe(403);
+    expect(repository.modeReads).toBe(0);
+    expect(repository.modeWrites).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("returns a database error when the X mode cannot be read", async () => {
+    const repository = new MemoryRepository();
+    repository.failModeRead = true;
+    const fetcher = vi.fn<typeof fetch>();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(messageRequest("/xmode"));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ status: "database_error" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("keeps an already disabled X mode unchanged", async () => {
+    const repository = new MemoryRepository();
+    const fetcher = successfulTelegram();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(callbackRequest(7, {
+      data: "xm:off",
+      messageId: 500,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok", mode: "off" });
+    expect(repository.modeReads).toBe(1);
+    expect(repository.modeWrites).toEqual([]);
+    expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[0]?.[1]?.body))).toEqual({
+      callback_query_id: "callback-query-1",
+      text: "Already OFF",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses xm:off as a durable emergency stop", async () => {
+    const repository = new MemoryRepository();
+    repository.xPostingMode = "manual";
+    const fetcher = successfulTelegram();
+    const now = new Date("2026-08-14T05:00:00.000Z");
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+      now: () => now,
+    });
+
+    const response = await handler(callbackRequest(7, {
+      data: "xm:off",
+      messageId: 500,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(repository.xPostingMode).toBe("off");
+    expect(repository.modeWrites).toEqual([{ mode: "off", now }]);
+    expect(vi.mocked(fetcher).mock.calls.map(([url]) => String(url))).toEqual([
+      "https://api.telegram.org/bottest-token/answerCallbackQuery",
+      "https://api.telegram.org/bottest-token/editMessageText",
+    ]);
+    expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[1]?.[1]?.body))).toEqual({
+      chat_id: "1331364954",
+      message_id: 500,
+      text: "X posting mode: OFF",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "OFF ✓", callback_data: "xm:off" },
+          { text: "MANUAL 🔒", callback_data: "xm:manual" },
+          { text: "AUTO 🔒", callback_data: "xm:auto" },
+        ]],
+      },
+    });
+  });
+
+  it.each([
+    ["xm:manual", "Manual mode is coming soon", "manual"],
+    ["xm:auto", "Auto mode is not configured", "auto"],
+  ] as const)("keeps %s locked", async (data, answer, mode) => {
+    const repository = new MemoryRepository();
+    const fetcher = successfulTelegram();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(callbackRequest(7, { data }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "locked", mode });
+    expect(repository.modeReads).toBe(0);
+    expect(repository.modeWrites).toEqual([]);
+    expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[0]?.[1]?.body))).toEqual({
+      callback_query_id: "callback-query-1",
+      text: answer,
+    });
+  });
+
+  it("rejects a foreign X mode callback before settings access", async () => {
+    const repository = new MemoryRepository();
+    const fetcher = vi.fn<typeof fetch>();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(callbackRequest(7, {
+      data: "xm:off",
+      chatId: 999,
+    }));
+
+    expect(response.status).toBe(403);
+    expect(repository.modeReads).toBe(0);
+    expect(repository.modeWrites).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("does not roll back OFF when Telegram fails after the durable write", async () => {
+    const repository = new MemoryRepository();
+    repository.xPostingMode = "auto";
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("provider detail", { status: 502 }),
+    );
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(callbackRequest(7, { data: "xm:off" }));
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ status: "provider_error" });
+    expect(repository.xPostingMode).toBe("off");
+    expect(repository.modeWrites).toHaveLength(1);
+  });
+
+  it("does not call Telegram when the OFF write fails", async () => {
+    const repository = new MemoryRepository();
+    repository.xPostingMode = "manual";
+    repository.failModeWrite = true;
+    const fetcher = vi.fn<typeof fetch>();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(callbackRequest(7, { data: "xm:off" }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ status: "database_error" });
+    expect(repository.xPostingMode).toBe("manual");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("atomically approves and renders a pending draft", async () => {
     const repository = new MemoryRepository();
     repository.seedDraft(7);
@@ -214,6 +490,27 @@ describe("Supabase Telegram approval webhook", () => {
 class MemoryRepository implements BotRepository {
   readonly drafts = new Map<number, StoredDraft>();
   reads = 0;
+  xPostingMode: XPostingMode = "off";
+  modeReads = 0;
+  readonly modeWrites: Array<{ mode: XPostingMode; now: Date }> = [];
+  failModeRead = false;
+  failModeWrite = false;
+
+  async getXPostingMode(): Promise<XPostingMode> {
+    this.modeReads += 1;
+    if (this.failModeRead) throw new Error("repository_error:get_x_posting_mode");
+    return this.xPostingMode;
+  }
+
+  async setXPostingMode(
+    mode: XPostingMode,
+    now: Date,
+  ): Promise<XPostingMode> {
+    if (this.failModeWrite) throw new Error("repository_error:set_x_posting_mode");
+    this.modeWrites.push({ mode, now });
+    this.xPostingMode = mode;
+    return mode;
+  }
 
   seedDraft(id: number): void {
     this.drafts.set(id, {
