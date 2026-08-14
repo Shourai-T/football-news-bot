@@ -1,6 +1,7 @@
 import type {
   DraftStatus,
   TelegramDraft,
+  XPostingMode,
 } from "./domain-types.ts";
 import { MAX_DRAFT_BODY_LENGTH } from "./limits.ts";
 
@@ -71,6 +72,27 @@ export class TelegramClient {
     return messageId;
   }
 
+  async sendXPostingModePanel(mode: XPostingMode): Promise<number> {
+    const response = await this.request("sendMessage", {
+      chat_id: this.config.chatId,
+      ...xPostingModePanel(mode),
+    });
+    const messageId = getMessageId(response.result);
+    if (messageId === null) throw new Error("telegram_invalid_response");
+    return messageId;
+  }
+
+  async editXPostingModePanel(
+    messageId: number,
+    mode: XPostingMode,
+  ): Promise<void> {
+    await this.request("editMessageText", {
+      chat_id: this.config.chatId,
+      message_id: messageId,
+      ...xPostingModePanel(mode),
+    });
+  }
+
   async editDraftState(
     telegramMessageId: number,
     currentText: string,
@@ -98,7 +120,7 @@ export class TelegramClient {
     await this.request("setWebhook", {
       url: webhookUrl,
       secret_token: webhookSecret,
-      allowed_updates: ["callback_query"],
+      allowed_updates: ["message", "callback_query"],
     });
   }
 
@@ -190,6 +212,22 @@ function formatDraft(draft: TelegramDraft): string {
   const body = truncate(draft.body, MAX_DRAFT_BODY_LENGTH);
   const sourceLength = TELEGRAM_TEXT_LIMIT - body.length - SOURCE_PREFIX.length;
   return `${body}${SOURCE_PREFIX}${truncate(draft.canonicalUrl, sourceLength)}`;
+}
+
+function xPostingModePanel(mode: XPostingMode): Record<string, unknown> {
+  return {
+    text: `X posting mode: ${mode.toUpperCase()}`,
+    reply_markup: {
+      inline_keyboard: [[
+        {
+          text: mode === "off" ? "OFF ✓" : "OFF",
+          callback_data: "xm:off",
+        },
+        { text: "MANUAL 🔒", callback_data: "xm:manual" },
+        { text: "AUTO 🔒", callback_data: "xm:auto" },
+      ]],
+    },
+  };
 }
 
 function truncate(value: string, maximumLength: number): string {

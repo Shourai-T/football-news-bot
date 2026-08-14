@@ -144,7 +144,7 @@ describe("Telegram diagnostic handler", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       url: "https://project.supabase.co/functions/v1/telegram-webhook",
       secret_token: "webhook-test-secret",
-      allowed_updates: ["callback_query"],
+      allowed_updates: ["message", "callback_query"],
     });
   });
 });

@@ -9,7 +9,7 @@ const webhookUrl = `https://${projectRef}.supabase.co/functions/v1/telegram-webh
 const configured = await telegramRequest(`${apiRoot}/setWebhook`, {
   url: webhookUrl,
   secret_token: webhookSecret,
-  allowed_updates: ["callback_query"],
+  allowed_updates: ["message", "callback_query"],
 });
 if (configured.result !== true) fail("set_webhook_failed");
 
