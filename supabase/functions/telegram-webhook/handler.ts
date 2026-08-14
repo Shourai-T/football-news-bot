@@ -67,10 +67,8 @@ export function createTelegramWebhookHandler(
       if (message === null) {
         return Response.json({ status: "bad_request" }, { status: 400 });
       }
-      let botToken: string;
       let configuredChatId: string;
       try {
-        botToken = readRequiredEnv("TELEGRAM_BOT_TOKEN", dependencies.readEnv);
         configuredChatId = readRequiredEnv(
           "TELEGRAM_CHAT_ID",
           dependencies.readEnv,
@@ -83,6 +81,12 @@ export function createTelegramWebhookHandler(
       }
       if (!isXModeCommand(message.text)) {
         return Response.json({ status: "ignored" });
+      }
+      let botToken: string;
+      try {
+        botToken = readRequiredEnv("TELEGRAM_BOT_TOKEN", dependencies.readEnv);
+      } catch {
+        return Response.json({ status: "misconfigured" }, { status: 500 });
       }
       let mode;
       try {

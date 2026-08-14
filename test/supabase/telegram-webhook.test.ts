@@ -254,6 +254,27 @@ describe("Supabase Telegram approval webhook", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("ignores ordinary messages without requiring the Telegram bot token", async () => {
+    const repository = new MemoryRepository();
+    const fetcher = vi.fn<typeof fetch>();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => name === "TELEGRAM_WEBHOOK_SECRET"
+        ? "webhook-test-secret"
+        : name === "TELEGRAM_CHAT_ID"
+        ? "1331364954"
+        : undefined,
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(messageRequest("hello"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ignored" });
+    expect(repository.modeReads).toBe(0);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("rejects a foreign /xmode command without reading settings", async () => {
     const repository = new MemoryRepository();
     const fetcher = vi.fn<typeof fetch>();
