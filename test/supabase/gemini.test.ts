@@ -12,6 +12,7 @@ const ARTICLE: Article = {
   topicScore: 3,
 };
 const CONFIG = { apiKey: "gemini-test-secret", model: "gemini-3.5-flash-lite" };
+const NOW = new Date("2026-08-10T01:30:00.000Z");
 
 beforeEach(() => {
   vi.spyOn(AbortSignal, "timeout").mockReturnValue(new AbortController().signal);
@@ -19,7 +20,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Supabase Gemini generation", () => {
-  it("uses only approved source fields and returns a trimmed English draft", async () => {
+  it("requests an original, attributed X post with controlled news labels", async () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     const fetcher: typeof fetch = async (input, init) => {
       calls.push({ input, init });
@@ -28,7 +29,7 @@ describe("Supabase Gemini generation", () => {
       });
     };
 
-    await expect(generateDraft(ARTICLE, CONFIG, fetcher)).resolves
+    await expect(generateDraft(ARTICLE, CONFIG, fetcher, NOW)).resolves
       .toBe("Club confirms the transfer.");
 
     const headers = new Headers(calls[0]?.init?.headers);
@@ -44,18 +45,32 @@ describe("Supabase Gemini generation", () => {
     expect(prompt).toContain(ARTICLE.excerpt);
     expect(prompt).toContain(ARTICLE.canonicalUrl);
     expect(prompt).toContain("English");
-    expect(prompt).toContain("3,000 characters");
-    expect(prompt).not.toContain(ARTICLE.publishedAt.toISOString());
+    expect(prompt).toContain("260 characters");
+    expect(prompt).toContain(ARTICLE.publishedAt.toISOString());
+    expect(prompt).toContain(NOW.toISOString());
+    expect(prompt).toContain("🚨 BREAKING:");
+    expect(prompt).toContain("✅ OFFICIAL:");
+    expect(prompt).toContain("📰 NEWS:");
+    expect(prompt).toContain("💬 QUOTE:");
+    expect(prompt).toContain("📊 STAT:");
+    expect(prompt).toContain("🔥 MATCH:");
+    expect(prompt).toContain("Choose exactly one prefix");
+    expect(prompt).toContain("Do not use BREAKING unless");
+    expect(prompt).toContain("HOOK → KEY FACT → CONTEXT");
+    expect(prompt).toContain("Do not copy");
+    expect(prompt).toContain("Do not include the canonical URL");
+    expect(prompt).toContain(`Via ${ARTICLE.sourceName}`);
+    expect(prompt).toContain("Return only the final X post text");
     expect(prompt).not.toContain("Source priority:");
     expect(prompt).not.toContain("Topic score:");
-    expect(body.generationConfig.maxOutputTokens).toBe(1024);
+    expect(body.generationConfig.maxOutputTokens).toBe(256);
   });
 
-  it("truncates overlong output to 3,000 characters", async () => {
+  it("truncates overlong output to 260 characters", async () => {
     const fetcher: typeof fetch = async () => Response.json({
       candidates: [{ content: { parts: [{ text: "x".repeat(3_500) }] } }],
     });
-    await expect(generateDraft(ARTICLE, CONFIG, fetcher)).resolves.toHaveLength(3_000);
+    await expect(generateDraft(ARTICLE, CONFIG, fetcher)).resolves.toHaveLength(260);
   });
 
   it("sanitizes empty, timeout, and provider API failures", async () => {
