@@ -150,23 +150,26 @@ The bot must return:
 ```text
 X posting mode: OFF
 
-[OFF ✓] [MANUAL 🔒] [AUTO 🔒]
+[OFF ✓] [MANUAL] [AUTO 🔒]
 ```
 
 The setting is stored in `public.bot_settings` and survives Edge Function
-deployments. This phase deliberately permits only `OFF`:
+deployments. `OFF` and `MANUAL` are available:
 
-- `OFF ✓` is idempotent and also acts as the emergency stop if a future mode
-  is ever stored.
-- `MANUAL 🔒` is reserved for the later `Approve → Open in X` phase.
+- `OFF ✓` is idempotent and prevents future approvals from rendering an X
+  composer button. It does not retract buttons already delivered to Telegram.
+- `MANUAL` makes a successful approval replace the draft controls with an
+  `Open in X` URL button. The X Web Intent contains only the draft body, not
+  the source URL. The operator must still press `Post` in X.
 - `AUTO 🔒` remains unavailable until X API posting, idempotency, durable
   attempt history, and reconciliation exist.
 
-Until those modes are implemented, `/xmode` also normalizes any manually
-stored `manual` or `auto` value back to `off` before displaying the panel.
+`/xmode` preserves `manual` but normalizes any manually stored `auto` value
+back to `off` before displaying the panel.
 
-Do not interpret an approved Telegram draft as an X post. Approval remains a
-database decision only while the mode is `OFF`.
+Do not interpret an approved Telegram draft or a rendered `Open in X` button
+as an X post. This phase never calls the X API; only the operator's final
+`Post` action publishes content.
 
 After applying migrations, verify the singleton before deploying the webhook:
 
@@ -187,11 +190,12 @@ Release verification order:
 4. Re-run `scripts/configure-telegram-webhook.mjs` through the stdin-only flow
    above so Telegram sends both required update types.
 5. Send `/xmode` in the configured private chat.
-6. Require `OFF ✓`, `MANUAL 🔒`, and `AUTO 🔒` in the returned panel.
-7. Press all three buttons and verify `public.bot_settings.x_posting_mode`
-   remains `off`.
-8. Approve one controlled draft and confirm the existing `approved` transition
-   remains unchanged.
+6. Require `OFF ✓`, `MANUAL`, and `AUTO 🔒` in the returned panel.
+7. Press `MANUAL`; require `MANUAL ✓` and verify the stored mode is `manual`.
+8. Press `AUTO 🔒`; verify the stored mode remains `manual`.
+9. Approve one controlled draft; require an `Open in X` button and verify the
+   composer contains the draft body without the source URL.
+10. Return to `OFF`; approve another controlled draft and require no X button.
 
 ## Manual pipeline invocation
 

@@ -181,7 +181,7 @@ describe("Supabase Telegram approval webhook", () => {
       reply_markup: {
         inline_keyboard: [[
           { text: "OFF ✓", callback_data: "xm:off" },
-          { text: "MANUAL 🔒", callback_data: "xm:manual" },
+          { text: "MANUAL", callback_data: "xm:manual" },
           { text: "AUTO 🔒", callback_data: "xm:auto" },
         ]],
       },
@@ -233,6 +233,36 @@ describe("Supabase Telegram approval webhook", () => {
     expect(repository.modeWrites).toEqual([{ mode: "off", now }]);
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
       text: "X posting mode: OFF",
+    });
+  });
+
+  it("preserves MANUAL when rendering the mode panel", async () => {
+    const repository = new MemoryRepository();
+    repository.xPostingMode = "manual";
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: { message_id: 500 },
+    }));
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(messageRequest("/xmode"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok", mode: "manual" });
+    expect(repository.modeWrites).toEqual([]);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+      text: "X posting mode: MANUAL",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "OFF", callback_data: "xm:off" },
+          { text: "MANUAL ✓", callback_data: "xm:manual" },
+          { text: "AUTO 🔒", callback_data: "xm:auto" },
+        ]],
+      },
     });
   });
 
@@ -365,17 +395,76 @@ describe("Supabase Telegram approval webhook", () => {
       reply_markup: {
         inline_keyboard: [[
           { text: "OFF ✓", callback_data: "xm:off" },
-          { text: "MANUAL 🔒", callback_data: "xm:manual" },
+          { text: "MANUAL", callback_data: "xm:manual" },
           { text: "AUTO 🔒", callback_data: "xm:auto" },
         ]],
       },
     });
   });
 
-  it.each([
-    ["xm:manual", "Manual mode is coming soon", "manual"],
-    ["xm:auto", "Auto mode is not configured", "auto"],
-  ] as const)("keeps %s locked", async (data, answer, mode) => {
+  it("durably enables MANUAL and refreshes the panel", async () => {
+    const repository = new MemoryRepository();
+    const fetcher = successfulTelegram();
+    const now = new Date("2026-08-27T01:00:00.000Z");
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+      now: () => now,
+    });
+
+    const response = await handler(callbackRequest(7, {
+      data: "xm:manual",
+      messageId: 500,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok", mode: "manual" });
+    expect(repository.xPostingMode).toBe("manual");
+    expect(repository.modeWrites).toEqual([{ mode: "manual", now }]);
+    expect(vi.mocked(fetcher).mock.calls.map(([url]) => String(url))).toEqual([
+      "https://api.telegram.org/bottest-token/answerCallbackQuery",
+      "https://api.telegram.org/bottest-token/editMessageText",
+    ]);
+    expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[0]?.[1]?.body))).toEqual({
+      callback_query_id: "callback-query-1",
+      text: "X posting mode set to MANUAL",
+    });
+    expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[1]?.[1]?.body))).toMatchObject({
+      text: "X posting mode: MANUAL",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "OFF", callback_data: "xm:off" },
+          { text: "MANUAL ✓", callback_data: "xm:manual" },
+          { text: "AUTO 🔒", callback_data: "xm:auto" },
+        ]],
+      },
+    });
+  });
+
+  it("keeps an already enabled MANUAL mode unchanged", async () => {
+    const repository = new MemoryRepository();
+    repository.xPostingMode = "manual";
+    const fetcher = successfulTelegram();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(callbackRequest(7, { data: "xm:manual" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok", mode: "manual" });
+    expect(repository.modeWrites).toEqual([]);
+    expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[0]?.[1]?.body))).toEqual({
+      callback_query_id: "callback-query-1",
+      text: "Already MANUAL",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps AUTO locked", async () => {
     const repository = new MemoryRepository();
     const fetcher = successfulTelegram();
     const handler = createTelegramWebhookHandler({
@@ -384,15 +473,15 @@ describe("Supabase Telegram approval webhook", () => {
       repository,
     });
 
-    const response = await handler(callbackRequest(7, { data }));
+    const response = await handler(callbackRequest(7, { data: "xm:auto" }));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "locked", mode });
+    await expect(response.json()).resolves.toEqual({ status: "locked", mode: "auto" });
     expect(repository.modeReads).toBe(0);
     expect(repository.modeWrites).toEqual([]);
     expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[0]?.[1]?.body))).toEqual({
       callback_query_id: "callback-query-1",
-      text: answer,
+      text: "Auto mode is not configured",
     });
   });
 
@@ -488,6 +577,44 @@ describe("Supabase Telegram approval webhook", () => {
     });
   });
 
+  it("renders Open in X with only the draft body when MANUAL is active", async () => {
+    const repository = new MemoryRepository();
+    repository.seedDraft(7);
+    repository.xPostingMode = "manual";
+    const stored = repository.drafts.get(7)!;
+    stored.body = "📰 NEWS: Club & player agree.\nVia BBC Sport Football";
+    const fetcher = successfulTelegram();
+    const handler = createTelegramWebhookHandler({
+      readEnv: (name) => ENV.get(name),
+      fetcher,
+      repository,
+    });
+
+    const response = await handler(callbackRequest(7));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      status: "ok",
+      decision: "approved",
+    });
+    expect(repository.drafts.get(7)?.status).toBe("approved");
+    expect(repository.modeReads).toBe(1);
+    const editPayload = JSON.parse(
+      String(vi.mocked(fetcher).mock.calls[1]?.[1]?.body),
+    ) as {
+      text: string;
+      reply_markup: {
+        inline_keyboard: Array<Array<{ text: string; url: string }>>;
+      };
+    };
+    expect(editPayload.text).toContain("Source: https://club.test/news/transfer");
+    const button = editPayload.reply_markup.inline_keyboard[0]?.[0];
+    expect(button?.text).toBe("Open in X");
+    const intent = new URL(button?.url ?? "");
+    expect(intent.searchParams.get("text")).toBe(stored.body);
+    expect(button?.url).not.toContain("club.test");
+  });
+
   it("rejects a pending draft and keeps repeated callbacks idempotent", async () => {
     const repository = new MemoryRepository();
     repository.seedDraft(7);
@@ -507,6 +634,7 @@ describe("Supabase Telegram approval webhook", () => {
     expect(rejected.status).toBe(200);
     expect(repeated.status).toBe(200);
     expect(repository.drafts.get(7)?.status).toBe("rejected");
+    expect(repository.modeReads).toBe(0);
     const answers = fetcher.mock.calls
       .filter(([url]) => String(url).endsWith("/answerCallbackQuery"))
       .map(([, init]) => JSON.parse(String(init?.body)).text);

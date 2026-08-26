@@ -104,7 +104,7 @@ describe("direct Telegram client", () => {
     });
   });
 
-  it("sends the current X posting mode with locked future controls", async () => {
+  it("sends the current X posting mode with manual available and auto locked", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       ok: true,
       result: { message_id: 500 },
@@ -121,7 +121,7 @@ describe("direct Telegram client", () => {
       reply_markup: {
         inline_keyboard: [[
           { text: "OFF ✓", callback_data: "xm:off" },
-          { text: "MANUAL 🔒", callback_data: "xm:manual" },
+          { text: "MANUAL", callback_data: "xm:manual" },
           { text: "AUTO 🔒", callback_data: "xm:auto" },
         ]],
       },
@@ -135,7 +135,7 @@ describe("direct Telegram client", () => {
     }));
     const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
 
-    await client.editXPostingModePanel(500, "off");
+    await client.editXPostingModePanel(500, "manual");
 
     const [url, init] = fetcher.mock.calls[0]!;
     expect(String(url)).toBe(
@@ -144,11 +144,11 @@ describe("direct Telegram client", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       chat_id: "1331364954",
       message_id: 500,
-      text: "X posting mode: OFF",
+      text: "X posting mode: MANUAL",
       reply_markup: {
         inline_keyboard: [[
-          { text: "OFF ✓", callback_data: "xm:off" },
-          { text: "MANUAL 🔒", callback_data: "xm:manual" },
+          { text: "OFF", callback_data: "xm:off" },
+          { text: "MANUAL ✓", callback_data: "xm:manual" },
           { text: "AUTO 🔒", callback_data: "xm:auto" },
         ]],
       },
@@ -182,6 +182,55 @@ describe("direct Telegram client", () => {
     expect(payload.message_id).toBe(314);
     expect(payload.text).toHaveLength(4_096);
     expect(payload.text).toMatch(/\n\nStatus: APPROVED$/u);
+    expect(payload.reply_markup).toEqual({ inline_keyboard: [] });
+  });
+
+  it("replaces decision controls with an encoded Open in X URL", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: true,
+    }));
+    const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
+    const xPostText = "📰 NEWS: Club & player agree.\nVia BBC Sport Football";
+
+    await client.editDraftState(
+      314,
+      `${xPostText}\n\nSource: https://club.test/news/transfer`,
+      "approved",
+      xPostText,
+    );
+
+    const payload = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)) as {
+      reply_markup: {
+        inline_keyboard: Array<Array<{ text: string; url: string }>>;
+      };
+    };
+    const button = payload.reply_markup.inline_keyboard[0]?.[0];
+    expect(button?.text).toBe("Open in X");
+    const intent = new URL(button?.url ?? "");
+    expect(intent.origin).toBe("https://x.com");
+    expect(intent.pathname).toBe("/intent/tweet");
+    expect(intent.searchParams.get("text")).toBe(xPostText);
+    expect(button?.url).not.toContain("club.test");
+  });
+
+  it("never offers Open in X for a rejected draft", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ok: true,
+      result: true,
+    }));
+    const client = new TelegramClient(TELEGRAM_CONFIG, fetcher);
+
+    await client.editDraftState(
+      314,
+      "Rejected draft.\n\nSource: https://club.test/news/transfer",
+      "rejected",
+      "Rejected draft.",
+    );
+
+    const payload = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)) as {
+      reply_markup: unknown;
+    };
     expect(payload.reply_markup).toEqual({ inline_keyboard: [] });
   });
 

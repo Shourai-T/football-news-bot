@@ -97,13 +97,21 @@ export class TelegramClient {
     telegramMessageId: number,
     currentText: string,
     status: Exclude<DraftStatus, "pending">,
+    xPostText?: string,
   ): Promise<void> {
     const suffix = `\n\nStatus: ${status.toUpperCase()}`;
     await this.request("editMessageText", {
       chat_id: this.config.chatId,
       message_id: telegramMessageId,
       text: truncate(currentText, TELEGRAM_TEXT_LIMIT - suffix.length) + suffix,
-      reply_markup: { inline_keyboard: [] },
+      reply_markup: status !== "approved" || xPostText === undefined
+        ? { inline_keyboard: [] }
+        : {
+          inline_keyboard: [[{
+            text: "Open in X",
+            url: xIntentUrl(xPostText),
+          }]],
+        },
     });
   }
 
@@ -223,7 +231,10 @@ function xPostingModePanel(mode: XPostingMode): Record<string, unknown> {
           text: mode === "off" ? "OFF ✓" : "OFF",
           callback_data: "xm:off",
         },
-        { text: "MANUAL 🔒", callback_data: "xm:manual" },
+        {
+          text: mode === "manual" ? "MANUAL ✓" : "MANUAL",
+          callback_data: "xm:manual",
+        },
         { text: "AUTO 🔒", callback_data: "xm:auto" },
       ]],
     },
@@ -232,6 +243,12 @@ function xPostingModePanel(mode: XPostingMode): Record<string, unknown> {
 
 function truncate(value: string, maximumLength: number): string {
   return value.slice(0, Math.max(0, maximumLength));
+}
+
+function xIntentUrl(text: string): string {
+  const url = new URL("https://x.com/intent/tweet");
+  url.searchParams.set("text", text);
+  return url.toString();
 }
 
 function isTimeout(error: unknown): boolean {

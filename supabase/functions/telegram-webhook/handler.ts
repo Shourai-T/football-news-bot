@@ -91,7 +91,7 @@ export function createTelegramWebhookHandler(
       let mode;
       try {
         mode = await dependencies.repository.getXPostingMode();
-        if (mode !== "off") {
+        if (mode === "auto") {
           mode = await dependencies.repository.setXPostingMode("off", now());
         }
       } catch {
@@ -131,15 +131,32 @@ export function createTelegramWebhookHandler(
       dependencies.fetcher,
     );
     if (callback.data === "xm:manual") {
+      let currentMode;
       try {
-        await telegram.answerCallback(
-          callback.id,
-          "Manual mode is coming soon",
-        );
+        currentMode = await dependencies.repository.getXPostingMode();
+      } catch {
+        return Response.json({ status: "database_error" }, { status: 500 });
+      }
+      if (currentMode === "manual") {
+        try {
+          await telegram.answerCallback(callback.id, "Already MANUAL");
+        } catch {
+          return Response.json({ status: "provider_error" }, { status: 502 });
+        }
+        return Response.json({ status: "ok", mode: "manual" });
+      }
+      try {
+        await dependencies.repository.setXPostingMode("manual", now());
+      } catch {
+        return Response.json({ status: "database_error" }, { status: 500 });
+      }
+      try {
+        await telegram.answerCallback(callback.id, "X posting mode set to MANUAL");
+        await telegram.editXPostingModePanel(callback.messageId, "manual");
       } catch {
         return Response.json({ status: "provider_error" }, { status: 502 });
       }
-      return Response.json({ status: "locked", mode: "manual" });
+      return Response.json({ status: "ok", mode: "manual" });
     }
     if (callback.data === "xm:auto") {
       try {
@@ -221,6 +238,17 @@ export function createTelegramWebhookHandler(
       return Response.json({ status: "ignored" });
     }
 
+    let xPostText: string | undefined;
+    if (status === "approved") {
+      let mode;
+      try {
+        mode = await dependencies.repository.getXPostingMode();
+      } catch {
+        return Response.json({ status: "database_error" }, { status: 500 });
+      }
+      if (mode === "manual") xPostText = stored.body;
+    }
+
     const changed = wasPending && status === decision;
     let providerFailed = false;
     try {
@@ -236,6 +264,7 @@ export function createTelegramWebhookHandler(
         stored.telegramMessageId,
         `${stored.body}\n\nSource: ${stored.canonicalUrl}`,
         status,
+        xPostText,
       );
     } catch {
       providerFailed = true;
