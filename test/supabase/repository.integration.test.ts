@@ -164,6 +164,50 @@ describe("Supabase bot repository", () => {
     )).resolves.toBe("approved");
   });
 
+  it("returns delivered diversity history and all recent selected attempts", async () => {
+    for (const [index, status] of ["pending", "approved", "rejected", "failed", "unsent"].entries()) {
+      const articleId = await repository.recordArticle({ ...BASE_ARTICLE,
+        canonicalUrl: `https://example.com/history/${index}` }, true, NOW);
+      const draftId = await repository.createDraft(articleId!, "Draft", NOW);
+      if (["pending", "approved", "rejected"].includes(status)) {
+        await repository.setDraftTelegramMessage(draftId, 100 + index);
+      }
+      if (status === "approved" || status === "rejected") await repository.transitionDraft(draftId, status, NOW);
+      if (status === "failed") await repository.markDraftFailed(draftId);
+    }
+    const history = await repository.getSelectionHistory(NOW);
+    expect(history.delivered).toHaveLength(3);
+    expect(history.selected).toHaveLength(5);
+  });
+
+  it("paginates beyond 100 delivered and selected articles", async () => {
+    const rows = Array.from({ length: 105 }, (_, index) => ({
+      canonical_url: `https://example.com/paginated/${index}`, title: `Messi update ${index}`,
+      source_name: "BBC Sport Football", published_at: NOW.toISOString(), excerpt: "",
+      eligible: true, created_at: NOW.toISOString(),
+    }));
+    const { data: articles, error: articleError } = await client.from("articles").insert(rows).select("id");
+    expect(articleError).toBeNull();
+    const { error: draftError } = await client.from("drafts").insert(articles!.map((article, index) => ({
+      article_id: article.id, body: `Draft ${index}`, telegram_message_id: 1_000 + index,
+      status: "pending", created_at: NOW.toISOString(),
+    })));
+    expect(draftError).toBeNull();
+    const history = await repository.getSelectionHistory(NOW);
+    expect(history.delivered).toHaveLength(105);
+    expect(history.selected).toHaveLength(105);
+  });
+
+  it("recognizes legacy BBC tracking URLs without matching adjacent paths", async () => {
+    await repository.recordArticle({ ...BASE_ARTICLE,
+      canonicalUrl: "https://www.bbc.co.uk/sport/football/articles/old?at_medium=RSS&at_campaign=rss",
+      publishedAt: new Date("2026-01-01T00:00:00Z") }, true, NOW);
+    await expect(repository.getSeenUrls([
+      "https://www.bbc.co.uk/sport/football/articles/old",
+      "https://www.bbc.co.uk/sport/football/articles/old-next",
+    ])).resolves.toEqual(new Set(["https://www.bbc.co.uk/sport/football/articles/old"]));
+  });
+
   it("marks an undelivered draft failed", async () => {
     const articleId = await repository.recordArticle(BASE_ARTICLE, true, NOW);
     const draftId = await repository.createDraft(

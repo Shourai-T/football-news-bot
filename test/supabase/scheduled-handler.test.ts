@@ -95,6 +95,9 @@ class HandlerRepository implements BotRepository {
   getSeenUrls(_canonicalUrls: readonly string[]): Promise<Set<string>> {
     return Promise.reject(new Error("unexpected_get_seen_urls"));
   }
+  getSelectionHistory(_now: Date): Promise<never> {
+    return Promise.reject(new Error("unexpected_get_selection_history"));
+  }
   recordArticle(_article: Article, _eligible: boolean, _now: Date): Promise<number | null> {
     return Promise.reject(new Error("unexpected_record_article"));
   }

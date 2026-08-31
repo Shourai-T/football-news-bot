@@ -316,6 +316,10 @@ class PipelineRepository implements BotRepository {
     return new Set();
   }
 
+  async getSelectionHistory(): Promise<{ delivered: Article[]; selected: Article[] }> {
+    return { delivered: [], selected: [] };
+  }
+
   async recordArticle(
     article: Article,
     eligible: boolean,

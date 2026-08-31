@@ -8,6 +8,8 @@ import type {
   TerminalRunOutcome,
   XPostingMode,
 } from "./domain-types.ts";
+import type { SelectionHistory } from "./editorial-types.ts";
+import { findLegacyBbcUrls, readSelectionHistory } from "./editorial-history.ts";
 
 const URL_LOOKUP_BATCH_SIZE = 100;
 const URL_LOOKUP_MAX_ENCODED_LENGTH = 1_800;
@@ -15,6 +17,7 @@ const URL_LOOKUP_MAX_ENCODED_LENGTH = 1_800;
 export interface BotRepository {
   beginRun(slotKey: string, localDate: string, now: Date): Promise<boolean>;
   getSeenUrls(canonicalUrls: readonly string[]): Promise<Set<string>>;
+  getSelectionHistory(now: Date): Promise<SelectionHistory>;
   recordArticle(
     article: Article,
     eligible: boolean,
@@ -78,10 +81,15 @@ export class SupabaseBotRepository implements BotRepository {
         if (error) throwRepositoryError("get_seen_urls");
         for (const article of data) seen.add(article.canonical_url);
       }
-      return seen;
+      const legacy = await findLegacyBbcUrls(this.client, uniqueUrls);
+      return new Set([...seen, ...legacy]);
     } catch (error) {
       rethrowRepositoryError(error, "get_seen_urls");
     }
+  }
+
+  getSelectionHistory(now: Date): Promise<SelectionHistory> {
+    return readSelectionHistory(this.client, now);
   }
 
   async recordArticle(
