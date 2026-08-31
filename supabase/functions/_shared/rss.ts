@@ -1,5 +1,8 @@
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import type { Article, FeedDefinition } from "./domain-types.ts";
+import { parsePublicationDate } from "./feed-date.ts";
+import { canonicalizeUrl } from "./url-normalization.ts";
+export { canonicalizeUrl } from "./url-normalization.ts";
 
 type XmlRecord = Record<string, unknown>;
 
@@ -20,17 +23,6 @@ const TOPIC_PATTERNS = [
   /\b(?:champions league|ucl)\b/i,
   /\b(?:premier league|epl)\b/i,
 ];
-
-export function canonicalizeUrl(rawUrl: string): string {
-  const url = new URL(rawUrl);
-  for (const key of [...url.searchParams.keys()]) {
-    if (key.startsWith("utm_") || key === "fbclid" || key === "gclid") {
-      url.searchParams.delete(key);
-    }
-  }
-  url.hash = "";
-  return url.toString();
-}
 
 export async function fetchFeedEntries(
   feeds: readonly FeedDefinition[],
@@ -149,8 +141,7 @@ function atomLink(value: unknown): string {
 }
 
 function publicationDate(value: unknown): Date | null {
-  const parsed = new Date(textValue(value));
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return parsePublicationDate(textValue(value), "standard");
 }
 
 function scoreTopic(value: string): number {
