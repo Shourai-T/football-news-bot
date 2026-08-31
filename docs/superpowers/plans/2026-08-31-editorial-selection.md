@@ -88,7 +88,7 @@ export function bbcArticleBase(rawUrl: string): string | null;
 export function escapeLikeLiteral(value: string): string;
 ```
 
-- [ ] **1. Write failing date and URL tests.** Use explicit expected UTC times:
+- [x] **1. Write failing date and URL tests.** Use explicit expected UTC times:
 
 ```ts
 import { expect, it } from "vitest";
@@ -118,13 +118,13 @@ it("removes only known BBC tracking parameters", () => {
 });
 ```
 
-- [ ] **2. Run the focused tests, confirming failure from missing functionality.**
+- [x] **2. Run the focused tests, confirming failure from missing functionality.**
 
 ```bash
 npx vitest run test/supabase/feed-date.test.ts test/supabase/url-normalization.test.ts
 ```
 
-- [ ] **3. Implement explicit parsing and URL helpers.** Recognize only ISO with
+- [x] **3. Implement explicit parsing and URL helpers.** Recognize only ISO with
   explicit `Z`/numeric offset and RFC-style English month dates with explicit
   GMT/UTC/numeric offset. Sky may translate a terminal BST token to `+0100`.
   Extract year/month/day/hour/minute/second/fraction/offset via anchored regexes;
@@ -167,7 +167,7 @@ export function escapeLikeLiteral(value: string): string {
 }
 ```
 
-- [ ] **4. Verify both machine-timezone variants and existing RSS behavior.** Do
+- [x] **4. Verify both machine-timezone variants and existing RSS behavior.** Do
   not yet change Sky policy selection or enabled feeds; that is Task 2.
 
 ```bash
@@ -177,7 +177,7 @@ npx vitest run test/supabase/rss.test.ts
 npm run typecheck
 ```
 
-- [ ] **5. Review the diff and commit this tested parser/identity unit.**
+- [x] **5. Review the diff and commit this tested parser/identity unit.**
 
 ```bash
 git add supabase/functions/_shared/feed-date.ts supabase/functions/_shared/url-normalization.ts supabase/functions/_shared/rss.ts test/supabase/feed-date.test.ts test/supabase/url-normalization.test.ts test/supabase/rss.test.ts
@@ -220,7 +220,7 @@ export interface FeedDiagnostic {
 // onDiagnostic?: (diagnostic: FeedDiagnostic) => void
 ```
 
-- [ ] **1. Add failing tests for source policy, non-feed HTTP 200 and date loss.**
+- [x] **1. Add failing tests for source policy, non-feed HTTP 200 and date loss.**
 
 ```ts
 it("enables only BBC and Sky, with Sky-specific dates", () => {
@@ -249,9 +249,9 @@ one-valid/one-invalid item, unsafe links, fetch rejection and timeout. For the
 Sky fixture use `Mon, 31 Aug 2026 09:54:00 BST` and assert one usable entry at
 `2026-08-31T08:54:00.000Z`, not merely that the request succeeded.
 
-- [ ] **2. Run `npx vitest run test/supabase/feed-config.test.ts test/supabase/rss.test.ts` and observe the intended failures.**
+- [x] **2. Run `npx vitest run test/supabase/feed-config.test.ts test/supabase/rss.test.ts` and observe the intended failures.**
 
-- [ ] **3. Implement source policy and root/item accounting.** Map BBC to `bbc`,
+- [x] **3. Implement source policy and root/item accounting.** Map BBC to `bbc`,
   Sky to `sky`; preserve historical Liverpool mapping to `liverpool` but give it
   no direct-announcement paths and do not include its feed in `VERIFIED_FEEDS`.
   Unknown sources use `unverified`, score 0 and no confirmation paths. All current
@@ -276,10 +276,10 @@ must use known error names/categories only; never include an exception message
 from `fetch`. A diagnostic callback must not turn a healthy fetch into a source
 failure. Do not log feed titles, URLs, snippets or response bodies.
 
-- [ ] **4. Run focused tests, then `npm test` and `npm run typecheck`.** Existing
+- [x] **4. Run focused tests, then `npm test` and `npm run typecheck`.** Existing
   callers without the optional fifth argument must still compile and work.
 
-- [ ] **5. Commit only the source/ingestion changes after reviewing the diff.**
+- [x] **5. Commit only the source/ingestion changes after reviewing the diff.**
 
 ```bash
 git add supabase/functions/_shared/feed-config.ts supabase/functions/_shared/rss.ts test/supabase/feed-config.test.ts test/supabase/rss.test.ts
@@ -329,7 +329,7 @@ export function analyzeArticle(article: Article, policy?: SourcePolicy): Analyze
 export function scoreArticle(item: AnalyzedArticle, now: Date): ScoreParts;
 ```
 
-- [ ] **1. Add failing tests for unique alias matches, false confirmations and scores.**
+- [x] **1. Add failing tests for unique alias matches, false confirmations and scores.**
 
 ```ts
 const NOW = new Date("2026-08-31T12:00:00Z");
@@ -359,9 +359,9 @@ registry remains unchanged. Require path/host match plus unambiguous first-party
 confirmation, and assert false for `/news/media-watch/`, `reportedly`, `rumour`,
 `rumor`, `according to`, `linked with`, a negated confirmation and a publisher.
 
-- [ ] **2. Run `npx vitest run test/supabase/editorial.test.ts` and verify red.**
+- [x] **2. Run `npx vitest run test/supabase/editorial.test.ts` and verify red.**
 
-- [ ] **3. Implement pure classification and score functions.** Normalize NFKD,
+- [x] **3. Implement pure classification and score functions.** Normalize NFKD,
   remove combining marks, lowercase, turn punctuation into spaces and collapse
   spaces. Recognize aliases with phrase boundaries, longest phrase first; return
   sets so repeated names cannot increase subject points.
@@ -411,11 +411,11 @@ to make a synthetic positive example pass. Use `The club confirms Harry Kane
 joins Arsenal` as the positive test excerpt, and keep the article on the
 test-only announcement path.
 
-- [ ] **4. Run classifier tests, `npm test`, and `npm run typecheck`.** Confirm
+- [x] **4. Run classifier tests, `npm test`, and `npm run typecheck`.** Confirm
   scores stay in 0–100, explicit player/club/competition categories contribute
   at most once, and future-skew clamping is tested separately from eligibility.
 
-- [ ] **5. Commit the pure classification/scoring unit.**
+- [x] **5. Commit the pure classification/scoring unit.**
 
 ```bash
 git add supabase/functions/_shared/editorial-types.ts supabase/functions/_shared/editorial.ts test/supabase/editorial.test.ts
@@ -437,7 +437,7 @@ export function groupCurrentEvents(items: readonly AnalyzedArticle[], now: Date)
 function extractEventFeatures(article: Article, features: Omit<EditorialFeatures, "event">): EventFeatures | null;
 ```
 
-- [ ] **1. Write positive and negative duplicate tests.** Start with a concrete
+- [x] **1. Write positive and negative duplicate tests.** Start with a concrete
   transfer discriminator and a changed destination, not just two similar names:
 
 ```ts
@@ -469,9 +469,9 @@ nontransitive A/B/C similarity chain. Reverse input order and assert the same
 representatives. For direct-official grouping use explicitly constructed analyzed
 fixtures or the Task 3 test-only policy, never a production registry bypass.
 
-- [ ] **2. Run `npx vitest run test/supabase/event-dedup.test.ts test/supabase/editorial.test.ts` and verify red.**
+- [x] **2. Run `npx vitest run test/supabase/event-dedup.test.ts test/supabase/editorial.test.ts` and verify red.**
 
-- [ ] **3. Extract only evidence-complete keys and implement grouping.** Event
+- [x] **3. Extract only evidence-complete keys and implement grouping.** Event
   extraction belongs in `editorial.ts`, using its alias tables, so dependencies
   remain one-way. The key is `JSON.stringify` of an ordered tuple, never a broad
   player-only hash. Use these exact completeness rules:
@@ -515,10 +515,10 @@ comparison). Iterate in that order; place an item in the first group for which
 each group's first element. This keeps official preference inside an event only;
 it does not give every official article unconditional priority across events.
 
-- [ ] **4. Run focused tests, `npm test`, and `npm run typecheck`.** Check empty
+- [x] **4. Run focused tests, `npm test`, and `npm run typecheck`.** Check empty
   inputs, input immutability and no external calls/import-time side effects.
 
-- [ ] **5. Review and commit the event comparator separately from selection.**
+- [x] **5. Review and commit the event comparator separately from selection.**
 
 ```bash
 git add supabase/functions/_shared/editorial.ts supabase/functions/_shared/event-dedup.ts test/supabase/editorial.test.ts test/supabase/event-dedup.test.ts
@@ -540,7 +540,7 @@ export function selectEditorialCandidate(
 ): SelectionResult | null;
 ```
 
-- [ ] **1. Add failing ranking scenarios, starting with source diversity.**
+- [x] **1. Add failing ranking scenarios, starting with source diversity.**
 
 ```ts
 const NOW = new Date("2026-08-31T12:00:00Z");
@@ -573,9 +573,9 @@ sources, empty feeds, all-stale/irrelevant/seen entries, boundaries at 72h/5min,
 invalid timestamps/HTTPS/title, stronger Sky beating weaker BBC with no cap
 pressure, previous selected events, and a later distinct development.
 
-- [ ] **2. Run `npx vitest run test/supabase/editorial-ranking.test.ts` and verify red.**
+- [x] **2. Run `npx vitest run test/supabase/editorial-ranking.test.ts` and verify red.**
 
-- [ ] **3. Implement hard filtering, grouping and counts as pure functions.**
+- [x] **3. Implement hard filtering, grouping and counts as pure functions.**
   Normalize all candidate URLs and seen URLs before comparison; catch invalid URLs
   as ineligible input rather than throwing out valid siblings. Preserve original
   Article object identity when its canonical URL is already normalized (pipeline
@@ -614,7 +614,7 @@ still contributed to today's repetition. Selected-event history is already
 window-bounded by the repository, but enforce its publication window in the pure
 selector too so direct callers cannot suppress stories with stale history.
 
-- [ ] **4. Run both ranking test files, classifier/event tests, all unit tests and typecheck.**
+- [x] **4. Run both ranking test files, classifier/event tests, all unit tests and typecheck.**
 
 ```bash
 npx vitest run test/supabase/ranking.test.ts test/supabase/editorial-ranking.test.ts test/supabase/event-dedup.test.ts test/supabase/editorial.test.ts
@@ -622,7 +622,7 @@ npm test
 npm run typecheck
 ```
 
-- [ ] **5. Review and commit the new selector; do not activate it in production yet.**
+- [x] **5. Review and commit the new selector; do not activate it in production yet.**
 
 ```bash
 git add supabase/functions/_shared/ranking.ts test/supabase/editorial-ranking.test.ts
@@ -645,7 +645,7 @@ export function findLegacyBbcUrls(client: SupabaseClient<Database>, urls: readon
 getSelectionHistory(now: Date): Promise<SelectionHistory>;
 ```
 
-- [ ] **1. Add failing database/history/integration cases.** Example delivered-history
+- [x] **1. Add failing database/history/integration cases.** Example delivered-history
   test goes inside the existing repository integration suite so its local cleanup
   and initialized repository are reused:
 
@@ -700,7 +700,7 @@ select * from finish();
 rollback;
 ```
 
-- [ ] **2. Run unit checks and local database tests to observe failures.** First
+- [x] **2. Run unit checks and local database tests to observe failures.** First
   confirm Docker/local Supabase are available and this is the disposable local
   test stack. Use `npm run supabase:start` only if needed. Never point integration
   tests at a linked/cloud URL: the existing test setup deletes local fixture rows.
@@ -712,7 +712,7 @@ npm run test:db
 npm run test:integration
 ```
 
-- [ ] **3. Implement bounded reads and the additive indexes.** The migration is
+- [x] **3. Implement bounded reads and the additive indexes.** The migration is
   exactly these two indexes, no new functions/tables/privileges:
 
 ```sql
@@ -782,7 +782,7 @@ implementation: callbacks must never request selection history. Search for other
 `implements BotRepository` before committing and update every test double without
 making the method optional.
 
-- [ ] **4. Apply the migration only to local Supabase, then rerun tests.** Do not
+- [x] **4. Apply the migration only to local Supabase, then rerun tests.** Do not
   use `db reset` or `db push --linked` as a shortcut.
 
 ```bash
@@ -793,7 +793,7 @@ npm test
 npm run typecheck
 ```
 
-- [ ] **5. Review and commit history access with its migration/tests.**
+- [x] **5. Review and commit history access with its migration/tests.**
 
 ```bash
 git add supabase/functions/_shared/editorial-history.ts supabase/functions/_shared/repository.ts supabase/migrations/202608310001_editorial_history_indexes.sql supabase/tests/database/0003_editorial_history.test.sql test/supabase/editorial-history.test.ts test/supabase/repository.integration.test.ts test/supabase/pipeline.test.ts test/supabase/scheduled-handler.test.ts test/supabase/telegram-webhook.test.ts
@@ -810,7 +810,7 @@ git commit -m "feat: read editorial history and match legacy bbc urls"
 Task 2 diagnostic callback is retained. `runScheduledPipeline` and HTTP response
 shapes do not change. Task 6 `getSelectionHistory(now)` is required, not optional.
 
-- [ ] **1. Add failing orchestration and failure tests before wiring.** In the
+- [x] **1. Add failing orchestration and failure tests before wiring.** In the
   existing `setup()`, return a proper `SelectionResult` around the same `ARTICLE`
   instance rather than an Article directly. Keep null-based tests intact.
 
@@ -859,9 +859,9 @@ reservation precedes that one generate call. Add all-feed failure, valid-empty,
 only-invalid-dates, duplicate-slot and exact-URL claim collision cases asserting
 zero generation. Keep existing Gemini/Telegram/persistence failure tests unchanged.
 
-- [ ] **2. Run `npx vitest run test/supabase/pipeline.test.ts test/supabase/scheduled-handler.test.ts` and confirm failing new assertions.**
+- [x] **2. Run `npx vitest run test/supabase/pipeline.test.ts test/supabase/scheduled-handler.test.ts` and confirm failing new assertions.**
 
-- [ ] **3. Wire only the pre-generation portion of the pipeline.** After the
+- [x] **3. Wire only the pre-generation portion of the pipeline.** After the
   existing all-feed-failure gate, read seen URLs and required history, then select:
 
 ```ts
@@ -905,7 +905,7 @@ migrated. Preserve the old hard-eligibility regression under the new signature,
 accessing `result?.article.canonicalUrl`. No wrapper that silently substitutes
 empty history is allowed. Search to prove no old selector callers remain.
 
-- [ ] **4. Verify logs and all regression suites.** Capture `console.error` in
+- [x] **4. Verify logs and all regression suites.** Capture `console.error` in
   tests, include sentinels in feed body/title/exception/token fields and assert
   they never appear in serialized logs. Assert feed counters and numeric fallback
   flag do appear. Use mocks so log tests do not call external providers.
@@ -922,7 +922,7 @@ The `rg` command is expected to return no matches (exit 1). Tests/typecheck must
 exit 0. Existing quota-concurrency integration test must still admit only five
 of six simultaneous reservations. Do not change or refund that quota behavior.
 
-- [ ] **5. Review the integrated change and commit.**
+- [x] **5. Review the integrated change and commit.**
 
 ```bash
 git add supabase/functions/_shared/pipeline.ts supabase/functions/_shared/ranking.ts supabase/functions/scheduled-pipeline/handler.ts test/supabase/pipeline.test.ts test/supabase/ranking.test.ts test/supabase/scheduled-handler.test.ts
@@ -938,6 +938,10 @@ this plan's checkboxes only after each corresponding verification is complete.
 **Interfaces:** No runtime interfaces added. Documentation describes existing
 authenticated operation, new diagnostic categories and additive migration only.
 
+The raw README substring regression in steps 1–2 is intentionally omitted: it
+would lock mutable prose rather than observable behavior. Runtime, database and
+security behavior remains covered by executable tests.
+
 - [ ] **1. Add a documentation regression before changing README.** Extend the
   existing raw-import runbook tests with these assertions:
 
@@ -952,7 +956,7 @@ it("documents editorial fallback without promising five posts", () => {
 
 - [ ] **2. Run `npx vitest run test/supabase/runbook-security.test.ts` and verify the expected failure.**
 
-- [ ] **3. Update README with this operator-facing content, preserving all other security instructions.**
+- [x] **3. Update README with this operator-facing content, preserving all other security instructions.**
 
 ```markdown
 ### Editorial selection
@@ -998,7 +1002,7 @@ following **operator steps, not commands to execute without authorization**:
 5. Roll back by redeploying the previous pipeline revision; leave indexes and
    all history/quota/settings intact. Never reset usage to make a test succeed.
 
-- [ ] **4. Run final verification freshly; capture counts from actual output.**
+- [x] **4. Run final verification freshly; capture counts from actual output.**
 
 ```bash
 npm test
@@ -1020,7 +1024,7 @@ Use the requesting-code-review and verification-before-completion skills before
 claiming implementation complete. Apply their review requirements to the actual
 diff; distinguish reviewer findings from accepted limitations in the spec.
 
-- [ ] **5. Commit the verified documentation and hand off the feature.**
+- [x] **5. Commit the verified documentation and hand off the feature.**
 
 ```bash
 git add README.md test/supabase/runbook-security.test.ts docs/superpowers/plans/2026-08-31-editorial-selection.md
@@ -1032,6 +1036,12 @@ git status --short --branch
 Report actual test results, commits and whether production deployment is still
 pending. Do not push, merge, apply cloud migrations, send Telegram messages or
 spend a Gemini request just because local implementation is finished.
+
+Final local evidence (2026-08-31): 192 unit tests, 14 repository integration
+tests, and 54 pgTAP assertions passed; typecheck, DB lint, and diff checks passed.
+Independent review has no remaining Critical or Important findings. The local
+Supabase stack was stopped with backup enabled. Production runtime RSS checks,
+cloud migration/deployment, and smoke execution remain pending authorization.
 
 ## Spec coverage and self-review checklist
 

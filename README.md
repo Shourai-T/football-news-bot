@@ -9,7 +9,7 @@ Approval is stored durably in Postgres. An approved draft is **not published to 
 ```text
 Supabase Cron (5 slots/day)
   -> scheduled-pipeline Edge Function
-  -> BBC / Sky Sports / Liverpool FC RSS
+  -> BBC / Sky Sports RSS
   -> Postgres deduplication and Gemini quota reservation
   -> Gemini draft generation
   -> Telegram Approve / Reject message
@@ -24,6 +24,31 @@ Telegram /xmode command
 ```
 
 Supabase is the only active runtime in this repository.
+
+### Editorial selection
+
+The pipeline reads BBC / Sky Sports RSS and scores eligible stories without an
+additional Gemini call. Sky timestamps are parsed with their explicit timezone.
+Liverpool and ESPN are not enabled in this release.
+
+It prefers no more than two delivered drafts per source, recognized club/player,
+or editorial type per Vietnam day. When all eligible choices exceed a cap, the
+least repetitive choice wins and logs `diversityFallback: 1`. With only two
+sources, any fifth draft requires that fallback. Age, relevance, deduplication,
+and the five-call Gemini quota are never relaxed. Five drafts are a target, not
+a guarantee.
+
+Daily diversity counts confirmed Telegram deliveries, including pending,
+approved, and rejected drafts, using the run's Vietnam start day. Approval does
+not confirm publication on X. The user still opens X and presses Post manually.
+
+Feed diagnostics distinguish invalid structure, date loss, HTTP errors, and
+timeouts. Inspect `rss_feed` and `editorial_selection` events by slot key. These
+logs contain counts and score components, not story text or secrets. Same-event
+comparison supports transfers, contracts, injuries, matches, quotes, and named
+statistics only when their required facts are complete; missing facts use
+URL-only matching. Different-minute concurrent runs can exceed soft caps or miss
+semantic duplicates.
 
 ## Requirements
 
@@ -106,7 +131,10 @@ Create these Database Vault secrets:
 
 Inspect only Vault secret names when diagnosing configuration. Do not select or print decrypted values.
 
-## Deployment
+## Initial/full-stack deployment
+
+This section is for a first complete installation only. Do not use it for the
+editorial-selection release; that release follows the narrower rollout below.
 
 Link the CLI to the intended project, then deploy the migration and both production functions:
 
@@ -116,6 +144,25 @@ npx supabase db push
 npx supabase functions deploy telegram-webhook --use-api
 npx supabase functions deploy scheduled-pipeline --use-api
 ```
+
+### Editorial-selection rollout
+
+These are operator steps. They are not authorization to change production:
+
+1. Review local evidence and confirm the target Supabase project. Review pending
+   migrations, then apply only `202608310001_editorial_history_indexes.sql`.
+2. Verify BBC and Sky RSS from the Supabase runtime with a one-off, read-only
+   operator check. Do not expose a public endpoint and do not invoke Gemini or
+   Telegram. A successful check from a Mac alone is insufficient. If no runtime
+   check is available, keep this release gate marked incomplete.
+3. Deploy only `scheduled-pipeline` with its updated shared modules. No webhook
+   registration, secret rotation, or posting-mode change is necessary.
+4. Observe the next existing Cron run, or obtain authorization for exactly one
+   manual smoke run that consumes the existing quota. If it times out, inspect
+   the recorded run before considering a retry.
+5. Roll back by redeploying the previous pipeline revision. Leave the additive
+   indexes and all history, quota, and settings data intact. Never reset usage to
+   make a test succeed.
 
 ## Telegram webhook
 
