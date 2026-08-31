@@ -1,10 +1,27 @@
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import type { Article, FeedDefinition } from "./domain-types.ts";
 import { parsePublicationDate } from "./feed-date.ts";
+import { resolveSource } from "./feed-config.ts";
 import { canonicalizeUrl } from "./url-normalization.ts";
 export { canonicalizeUrl } from "./url-normalization.ts";
 
 type XmlRecord = Record<string, unknown>;
+
+export interface FeedDiagnostic {
+  sourceId: string;
+  outcome: "ok" | "empty" | "failed";
+  category: "none" | "timeout" | "network" | "http" | "invalid_xml" |
+    "unsupported_structure" | "all_items_invalid";
+  items: number;
+  usable: number;
+  invalidDate: number;
+  invalidUrl: number;
+  invalidContent: number;
+}
+
+class FeedError extends Error {
+  constructor(readonly category: FeedDiagnostic["category"]) { super(category); }
+}
 
 const parser = new XMLParser({
   attributeNamePrefix: "@_",
@@ -29,22 +46,27 @@ export async function fetchFeedEntries(
   fetcher: typeof fetch,
   now: Date,
   onFeedFailure?: (feedName: string) => void,
+  onDiagnostic?: (diagnostic: FeedDiagnostic) => void,
 ): Promise<Article[]> {
   void now;
   const results = await Promise.allSettled(
     feeds.map(async (feed) => ({
       feed,
-      entries: await fetchSingleFeed(feed, fetcher),
+      result: await fetchSingleFeed(feed, fetcher),
     })),
   );
   const bestByUrl = new Map<string, Article>();
 
   results.forEach((result, index) => {
     if (result.status === "rejected") {
-      onFeedFailure?.(feeds[index]!.name);
+      observe(onFeedFailure, feeds[index]!.name);
+      observe(onDiagnostic, { ...newDiagnostic(feeds[index]!), outcome: "failed", category: "network" });
       return;
     }
-    for (const entry of result.value.entries) {
+    const { entries, diagnostic } = result.value.result;
+    if (diagnostic.outcome === "failed") observe(onFeedFailure, result.value.feed.name);
+    observe(onDiagnostic, diagnostic);
+    for (const entry of entries) {
       const existing = bestByUrl.get(entry.canonicalUrl);
       if (!existing || isBetterDuplicate(entry, existing)) {
         bestByUrl.set(entry.canonicalUrl, entry);
@@ -57,52 +79,60 @@ export async function fetchFeedEntries(
 async function fetchSingleFeed(
   feed: FeedDefinition,
   fetcher: typeof fetch,
-): Promise<Article[]> {
-  const response = await fetcher(feed.url, {
-    signal: AbortSignal.timeout(8_000),
-  });
-  if (!response.ok) throw new Error("rss_http_error");
-  const xml = await response.text();
-  if (XMLValidator.validate(xml) !== true) throw new Error("rss_invalid_xml");
-  const document = asRecord(parser.parse(xml)) ?? {};
-  return [
-    ...extractRssItems(document, feed),
-    ...extractAtomEntries(document, feed),
-  ];
-}
-
-function extractRssItems(document: XmlRecord, feed: FeedDefinition): Article[] {
-  const channel = asRecord(asRecord(document.rss)?.channel);
-  return asArray(channel?.item).map(asRecord)
-    .flatMap((entry) => normalizeEntry(entry, feed, "rss"));
-}
-
-function extractAtomEntries(document: XmlRecord, feed: FeedDefinition): Article[] {
-  const atom = asRecord(document.feed);
-  return asArray(atom?.entry).map(asRecord)
-    .flatMap((entry) => normalizeEntry(entry, feed, "atom"));
+): Promise<{ entries: Article[]; diagnostic: FeedDiagnostic }> {
+  const diagnostic = newDiagnostic(feed);
+  try {
+    const response = await fetcher(feed.url, { signal: AbortSignal.timeout(8_000) });
+    if (!response.ok) throw new FeedError("http");
+    const xml = await response.text();
+    if (XMLValidator.validate(xml) !== true) throw new FeedError("invalid_xml");
+    const document = asRecord(parser.parse(xml)) ?? {};
+    const rss = asRecord(document.rss);
+    const isRss = Object.hasOwn(rss ?? {}, "channel");
+    const isAtom = Object.hasOwn(document, "feed");
+    if (!isRss && !isAtom) throw new FeedError("unsupported_structure");
+    const format = isRss ? "rss" : "atom";
+    const raw = isRss ? asRecord(rss?.channel)?.item : asRecord(document.feed)?.entry;
+    const items = asArray(raw);
+    diagnostic.items = items.length;
+    const entries = items.flatMap((item) => normalizeEntry(asRecord(item), feed, format, diagnostic));
+    diagnostic.usable = entries.length;
+    if (items.length > 0 && entries.length === 0) throw new FeedError("all_items_invalid");
+    diagnostic.outcome = entries.length ? "ok" : "empty";
+    return { entries, diagnostic };
+  } catch (error) {
+    diagnostic.outcome = "failed";
+    diagnostic.category = error instanceof FeedError ? error.category :
+      error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name) ? "timeout" : "network";
+    return { entries: [], diagnostic };
+  }
 }
 
 function normalizeEntry(
   entry: XmlRecord | undefined,
   feed: FeedDefinition,
   format: "rss" | "atom",
+  diagnostic: FeedDiagnostic,
 ): Article[] {
-  if (!entry) return [];
+  if (!entry || !textValue(entry.title)) {
+    diagnostic.invalidContent += 1;
+    return [];
+  }
   const title = textValue(entry.title);
   const rawUrl = format === "rss" ? textValue(entry.link) : atomLink(entry.link);
-  const publishedAt = publicationDate(
-    format === "rss"
-      ? entry.pubDate ?? entry.isoDate ?? entry.date
-      : entry.published ?? entry.updated,
-  );
-  if (!title || !rawUrl || !publishedAt) return [];
-
   let canonicalUrl: string;
   try {
     canonicalUrl = canonicalizeUrl(rawUrl);
-    if (new URL(canonicalUrl).protocol !== "https:") return [];
+    if (new URL(canonicalUrl).protocol !== "https:") throw new Error("invalid_url");
   } catch {
+    diagnostic.invalidUrl += 1;
+    return [];
+  }
+  const publishedAt = parsePublicationDate(textValue(format === "rss"
+    ? entry.pubDate ?? entry.isoDate ?? entry.date
+    : entry.published ?? entry.updated), resolveSource(feed.name).datePolicy);
+  if (!publishedAt) {
+    diagnostic.invalidDate += 1;
     return [];
   }
 
@@ -140,10 +170,6 @@ function atomLink(value: unknown): string {
   return "";
 }
 
-function publicationDate(value: unknown): Date | null {
-  return parsePublicationDate(textValue(value), "standard");
-}
-
 function scoreTopic(value: string): number {
   return TOPIC_PATTERNS.reduce(
     (score, pattern) => score + Number(pattern.test(value)),
@@ -171,4 +197,13 @@ function textValue(value: unknown): string {
 
 function stripMarkup(value: string): string {
   return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function newDiagnostic(feed: FeedDefinition): FeedDiagnostic {
+  return { sourceId: resolveSource(feed.name).id, outcome: "empty", category: "none",
+    items: 0, usable: 0, invalidDate: 0, invalidUrl: 0, invalidContent: 0 };
+}
+
+function observe<T>(callback: ((value: T) => void) | undefined, value: T): void {
+  try { callback?.(value); } catch { /* Observability must not discard usable news. */ }
 }
