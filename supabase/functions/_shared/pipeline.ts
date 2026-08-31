@@ -4,9 +4,9 @@ import type {
   TerminalRunOutcome,
 } from "./domain-types.ts";
 import { generateDraft } from "./gemini.ts";
-import { selectBestCandidate } from "./ranking.ts";
+import { selectEditorialCandidate } from "./ranking.ts";
 import type { BotRepository } from "./repository.ts";
-import { fetchFeedEntries } from "./rss.ts";
+import { fetchFeedEntries, type FeedDiagnostic } from "./rss.ts";
 import type { TelegramClient } from "./telegram.ts";
 
 const VIETNAM_TIME_ZONE = "Asia/Ho_Chi_Minh";
@@ -16,7 +16,7 @@ export type PipelineRunOutcome = TerminalRunOutcome | "duplicate";
 export interface PipelineDependencies {
   repository: BotRepository;
   fetchFeeds: typeof fetchFeedEntries;
-  selectCandidate: typeof selectBestCandidate;
+  selectCandidate: typeof selectEditorialCandidate;
   generate: typeof generateDraft;
   telegram: Pick<TelegramClient, "sendDraft" | "editDraftState">;
   feeds: readonly FeedDefinition[];
@@ -55,6 +55,7 @@ export async function runScheduledPipeline(
         () => {
           failedFeeds += 1;
         },
+        (diagnostic) => logFeedDiagnostic(slotKey, diagnostic),
       );
     } catch (error) {
       return await completeFailure(
@@ -79,15 +80,37 @@ export async function runScheduledPipeline(
       );
     }
 
-    const seenUrls = await dependencies.repository.getSeenUrls(
-      entries.map((entry) => entry.canonicalUrl),
-    );
-    const candidate = dependencies.selectCandidate(
+    const [seenUrls, history] = await Promise.all([
+      dependencies.repository.getSeenUrls(
+        entries.map((entry) => entry.canonicalUrl),
+      ),
+      dependencies.repository.getSelectionHistory(scheduledAt),
+    ]);
+    const selection = dependencies.selectCandidate(
       entries,
       seenUrls,
       scheduledAt,
+      history,
     );
-    if (candidate === null) {
+    if (selection === null) {
+      logEvent("editorial_selection", { slotKey, outcome: "no_candidate" });
+      return await complete(
+        dependencies.repository,
+        slotKey,
+        "no_candidate",
+        null,
+        scheduledAt,
+      );
+    }
+    const candidate = selection.article;
+
+    const articleId = await dependencies.repository.recordArticle(
+      candidate,
+      true,
+      scheduledAt,
+    );
+    if (articleId === null) {
+      logEvent("editorial_selection", { slotKey, outcome: "claim_collision" });
       return await complete(
         dependencies.repository,
         slotKey,
@@ -97,20 +120,19 @@ export async function runScheduledPipeline(
       );
     }
 
-    const articleId = await dependencies.repository.recordArticle(
-      candidate,
-      true,
-      scheduledAt,
-    );
-    if (articleId === null) {
-      return await complete(
-        dependencies.repository,
-        slotKey,
-        "no_candidate",
-        null,
-        scheduledAt,
-      );
-    }
+    logEvent("editorial_selection", {
+      slotKey,
+      articleId,
+      sourceId: selection.sourceId,
+      classifierVersion: selection.classifierVersion,
+      scoreEvent: selection.score.event,
+      scoreSubjects: selection.score.subjects,
+      scoreFreshness: selection.score.freshness,
+      scoreSource: selection.score.source,
+      scoreTotal: selection.score.total,
+      excess: selection.excess,
+      diversityFallback: Number(selection.diversityFallback),
+    });
 
     const reserved = await dependencies.repository.reserveGeminiRequest(
       slotKey,
@@ -351,5 +373,27 @@ function logEvent(
   event: string,
   fields: Record<string, string | number>,
 ): void {
-  console.error(JSON.stringify({ event, ...fields }));
+  try {
+    console.error(JSON.stringify({ event, ...fields }));
+  } catch {
+    // Logging is best-effort and must not affect durable pipeline state.
+  }
+}
+
+function logFeedDiagnostic(slotKey: string, diagnostic: FeedDiagnostic): void {
+  try {
+    logEvent("rss_feed", {
+      slotKey,
+      sourceId: diagnostic.sourceId,
+      outcome: diagnostic.outcome,
+      category: diagnostic.category,
+      items: diagnostic.items,
+      usable: diagnostic.usable,
+      invalidDate: diagnostic.invalidDate,
+      invalidUrl: diagnostic.invalidUrl,
+      invalidContent: diagnostic.invalidContent,
+    });
+  } catch {
+    // Observability must never change a completed delivery into a failure.
+  }
 }

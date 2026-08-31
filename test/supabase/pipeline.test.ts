@@ -9,6 +9,12 @@ import type {
 } from "../../supabase/functions/_shared/domain-types";
 import type { BotRepository } from "../../supabase/functions/_shared/repository";
 import { TelegramClient } from "../../supabase/functions/_shared/telegram";
+import { selectEditorialCandidate } from "../../supabase/functions/_shared/ranking";
+import { fetchFeedEntries } from "../../supabase/functions/_shared/rss";
+import type {
+  SelectionHistory,
+  SelectionResult,
+} from "../../supabase/functions/_shared/editorial-types";
 import {
   type PipelineDependencies,
   runScheduledPipeline,
@@ -209,6 +215,153 @@ describe("Supabase scheduled content pipeline", () => {
     expect(context.repository.completions[0]?.outcome).toBe("internal_failed");
   });
 
+  it("does not spend quota or send messages when history cannot be read", async () => {
+    const context = setup();
+    context.repository.historyError = true;
+
+    expect(await runScheduledPipeline(context.dependencies, NOW)).toBe("internal_failed");
+    expect(context.selectCandidate).not.toHaveBeenCalled();
+    expect(context.repository.reservations).toHaveLength(0);
+    expect(context.generate).not.toHaveBeenCalled();
+    expect(context.telegramFetch).not.toHaveBeenCalled();
+  });
+
+  it("passes delivery and attempt history into the pure selector", async () => {
+    const context = setup();
+    context.repository.history = { delivered: [ARTICLE], selected: [ARTICLE] };
+    context.selectCandidate.mockReturnValue(null);
+
+    await runScheduledPipeline(context.dependencies, NOW);
+
+    expect(context.selectCandidate).toHaveBeenCalledWith(
+      [ARTICLE],
+      new Set(),
+      NOW,
+      context.repository.history,
+    );
+    expect(context.generate).not.toHaveBeenCalled();
+  });
+
+  it("uses the real selector to prefer a diverse source before one Gemini call", async () => {
+    const context = setup();
+    const bbc = {
+      ...ARTICLE,
+      title: "Harry Kane joins Arsenal",
+      sourceName: "BBC Sport Football",
+      canonicalUrl: "https://www.bbc.co.uk/sport/football/articles/current",
+    };
+    const sky = {
+      ...ARTICLE,
+      title: "Cristiano Ronaldo says his next target is another trophy",
+      excerpt: 'Cristiano Ronaldo said "My next target is to win another major trophy with this team".',
+      sourceName: "Sky Sports Football",
+      canonicalUrl: "https://www.skysports.com/football/news/sky-quote",
+    };
+    context.fetchFeeds.mockResolvedValue([bbc, sky]);
+    context.repository.history = {
+      delivered: [
+        { ...bbc, canonicalUrl: "https://www.bbc.co.uk/sport/football/articles/old-1" },
+        { ...bbc, canonicalUrl: "https://www.bbc.co.uk/sport/football/articles/old-2" },
+      ],
+      selected: [],
+    };
+    context.selectCandidate.mockImplementation(selectEditorialCandidate);
+
+    await expect(runScheduledPipeline(context.dependencies, NOW)).resolves.toBe("draft_sent");
+
+    expect(context.generate).toHaveBeenCalledOnce();
+    expect(context.generate.mock.calls[0]?.[0]).toBe(sky);
+    expect(context.repository.reservations).toHaveLength(1);
+    expect(context.repository.events).toEqual(expect.arrayContaining(["reserve", "generate"]));
+    expect(context.repository.events.indexOf("reserve"))
+      .toBeLessThan(context.repository.events.indexOf("generate"));
+  });
+
+  it("does not generate after an exact URL claim collision", async () => {
+    const context = setup();
+    context.repository.articleId = null;
+
+    await expect(runScheduledPipeline(context.dependencies, NOW)).resolves.toBe("no_candidate");
+
+    expect(context.repository.reservations).toHaveLength(0);
+    expect(context.generate).not.toHaveBeenCalled();
+    expect(context.telegramFetch).not.toHaveBeenCalled();
+  });
+
+  it("logs only bounded RSS counters and editorial decision fields", async () => {
+    const context = setup();
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    context.fetchFeeds.mockImplementation(async (_feeds, _fetcher, _now, _failure, diagnostic) => {
+      diagnostic?.({ sourceId: "bbc", outcome: "failed", category: "http", items: 3,
+        usable: 0, invalidDate: 1, invalidUrl: 1, invalidContent: 1 });
+      return [{ ...ARTICLE, title: "PRIVATE_TITLE", excerpt: "PRIVATE_BODY" }];
+    });
+    context.selectCandidate.mockReturnValue(null);
+
+    await runScheduledPipeline(context.dependencies, NOW);
+
+    const serialized = log.mock.calls.flat().join("\n");
+    expect(serialized).toContain('"event":"rss_feed"');
+    expect(serialized).toContain('"items":3');
+    expect(serialized).toContain('"event":"editorial_selection"');
+    expect(serialized).not.toMatch(/PRIVATE_TITLE|PRIVATE_BODY|gemini-test-key|test-token/u);
+    log.mockRestore();
+  });
+
+  it("treats a valid empty RSS feed as no_candidate without generation", async () => {
+    const context = setup();
+    const rssFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("<rss><channel></channel></rss>", { status: 200 }),
+    );
+    const dependencies = {
+      ...context.dependencies,
+      feeds: [FEEDS[0]!],
+      fetchFeeds: fetchFeedEntries,
+      selectCandidate: selectEditorialCandidate,
+      fetcher: rssFetch,
+    };
+
+    await expect(runScheduledPipeline(dependencies, NOW)).resolves.toBe("no_candidate");
+
+    expect(context.generate).not.toHaveBeenCalled();
+    expect(context.repository.reservations).toHaveLength(0);
+  });
+
+  it("treats a feed containing only invalid dates as unavailable", async () => {
+    const context = setup();
+    const rssFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(`
+      <rss><channel><item>
+        <title>Liverpool transfer news</title>
+        <link>https://example.com/story</link>
+        <pubDate>PRIVATE_INVALID_DATE</pubDate>
+      </item></channel></rss>
+    `, { status: 200 }));
+    const dependencies = {
+      ...context.dependencies,
+      feeds: [FEEDS[0]!],
+      fetchFeeds: fetchFeedEntries,
+      fetcher: rssFetch,
+    };
+
+    await expect(runScheduledPipeline(dependencies, NOW)).resolves.toBe("rss_unavailable");
+
+    expect(context.generate).not.toHaveBeenCalled();
+    expect(context.repository.reservations).toHaveLength(0);
+  });
+
+  it("does not let a failing log sink change delivery", async () => {
+    const context = setup();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {
+      throw new Error("log_sink_failed");
+    });
+
+    await expect(runScheduledPipeline(context.dependencies, NOW)).resolves.toBe("draft_sent");
+
+    expect(context.generate).toHaveBeenCalledOnce();
+    expect(context.telegramFetch).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
+
   it("treats a repeated UTC-minute slot as a no-op", async () => {
     const context = setup();
     context.selectCandidate.mockReturnValue(null);
@@ -248,10 +401,20 @@ function setup(options: { telegramStatus?: number } = {}) {
     async () => [ARTICLE],
   );
   const selectCandidate = vi.fn<PipelineDependencies["selectCandidate"]>(
-    (): Article | null => ARTICLE,
+    (): SelectionResult => ({
+      article: ARTICLE,
+      sourceId: "bbc",
+      score: { event: 20, subjects: 5, freshness: 30, source: 15, total: 70 },
+      diversityFallback: false,
+      excess: 0,
+      classifierVersion: "editorial-v1",
+    }),
   );
   const generate = vi.fn<PipelineDependencies["generate"]>(
-    async () => "An English football draft.",
+    async () => {
+      repository.events.push("generate");
+      return "An English football draft.";
+    },
   );
   const telegramFetch = vi.fn<typeof fetch>().mockResolvedValue(
     options.telegramStatus
@@ -291,8 +454,13 @@ class PipelineRepository implements BotRepository {
   }> = [];
   readonly reservations: Array<{ slotKey: string; localDate: string }> = [];
   readonly createdDrafts: Array<{ articleId: number; body: string }> = [];
+  readonly recordedArticles: Article[] = [];
   readonly telegramMessages: Array<{ draftId: number; messageId: number }> = [];
   readonly failedDraftIds: number[] = [];
+  history: SelectionHistory = { delivered: [], selected: [] };
+  historyError = false;
+  articleId: number | null = 41;
+  readonly events: string[] = [];
   quotaAvailable = true;
   getSeenUrlsError = false;
   expectedLocalDate = LOCAL_DATE;
@@ -316,8 +484,9 @@ class PipelineRepository implements BotRepository {
     return new Set();
   }
 
-  async getSelectionHistory(): Promise<{ delivered: Article[]; selected: Article[] }> {
-    return { delivered: [], selected: [] };
+  async getSelectionHistory(): Promise<SelectionHistory> {
+    if (this.historyError) throw new Error("repository_error:get_selection_history");
+    return this.history;
   }
 
   async recordArticle(
@@ -325,12 +494,13 @@ class PipelineRepository implements BotRepository {
     eligible: boolean,
     _now: Date,
   ): Promise<number | null> {
-    expect(article).toBe(ARTICLE);
     expect(eligible).toBe(true);
-    return 41;
+    this.recordedArticles.push(article);
+    return this.articleId;
   }
 
   async reserveGeminiRequest(slotKey: string, localDate: string): Promise<boolean> {
+    this.events.push("reserve");
     this.reservations.push({ slotKey, localDate });
     return this.quotaAvailable;
   }

@@ -4,7 +4,7 @@ import {
   runScheduledPipeline,
   toSlotKey,
 } from "../_shared/pipeline.ts";
-import { selectBestCandidate } from "../_shared/ranking.ts";
+import { selectEditorialCandidate } from "../_shared/ranking.ts";
 import type { BotRepository } from "../_shared/repository.ts";
 import {
   readRequiredEnv,
@@ -57,7 +57,7 @@ export function createScheduledPipelineHandler(
       const outcome = await runScheduledPipeline({
         repository: dependencies.createRepository(),
         fetchFeeds: fetchFeedEntries,
-        selectCandidate: selectBestCandidate,
+        selectCandidate: selectEditorialCandidate,
         generate: generateDraft,
         telegram: new TelegramClient({ botToken, chatId }, dependencies.fetcher),
         feeds: VERIFIED_FEEDS,
