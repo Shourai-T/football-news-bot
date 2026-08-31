@@ -142,7 +142,7 @@ async function readRecentArticles(
       .from("articles")
       .select("id,canonical_url,title,source_name,published_at,excerpt,eligible,created_at")
       .gte("published_at", oldest)
-      .lt("published_at", newest)
+      .lte("published_at", newest)
       .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
     if (error) throw error;

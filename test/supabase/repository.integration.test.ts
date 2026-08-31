@@ -198,6 +198,105 @@ describe("Supabase bot repository", () => {
     expect(history.selected).toHaveLength(105);
   });
 
+  it("includes both selected-history eligibility boundaries", async () => {
+    const rows = [
+      ["oldest", new Date(NOW.getTime() - 72 * 60 * 60 * 1_000)],
+      ["newest", new Date(NOW.getTime() + 5 * 60 * 1_000)],
+      ["too-old", new Date(NOW.getTime() - 72 * 60 * 60 * 1_000 - 1)],
+      ["too-new", new Date(NOW.getTime() + 5 * 60 * 1_000 + 1)],
+    ] as const;
+    for (const [slug, publishedAt] of rows) {
+      await repository.recordArticle({ ...BASE_ARTICLE,
+        canonicalUrl: `https://example.com/boundary/${slug}`, publishedAt }, true, NOW);
+    }
+
+    const history = await repository.getSelectionHistory(NOW);
+
+    expect(history.selected.map((article) => article.canonicalUrl)).toEqual([
+      "https://example.com/boundary/oldest",
+      "https://example.com/boundary/newest",
+    ]);
+  });
+
+  it("handles zero and exactly one full page of history", async () => {
+    await expect(repository.getSelectionHistory(NOW)).resolves.toEqual({
+      delivered: [],
+      selected: [],
+    });
+    const rows = Array.from({ length: 100 }, (_, index) => ({
+      canonical_url: `https://example.com/full-page/${index}`,
+      title: `Messi update ${index}`,
+      source_name: "BBC Sport Football",
+      published_at: NOW.toISOString(),
+      excerpt: "",
+      eligible: true,
+      created_at: NOW.toISOString(),
+    }));
+    const { data: articles, error: articleError } = await client
+      .from("articles").insert(rows).select("id");
+    expect(articleError).toBeNull();
+    const { error: draftError } = await client.from("drafts").insert(
+      articles!.map((article, index) => ({
+        article_id: article.id,
+        body: `Draft ${index}`,
+        telegram_message_id: 2_000 + index,
+        status: "pending",
+        created_at: NOW.toISOString(),
+      })),
+    );
+    expect(draftError).toBeNull();
+
+    const history = await repository.getSelectionHistory(NOW);
+    expect(history.delivered).toHaveLength(100);
+    expect(history.selected).toHaveLength(100);
+  });
+
+  it("includes Vietnam day start and excludes its end for deliveries", async () => {
+    const start = new Date("2026-08-11T17:00:00.000Z");
+    const beforeEnd = new Date("2026-08-12T16:59:59.999Z");
+    const end = new Date("2026-08-12T17:00:00.000Z");
+    for (const [index, createdAt] of [start, beforeEnd, end].entries()) {
+      const articleId = await repository.recordArticle({
+        ...BASE_ARTICLE,
+        canonicalUrl: `https://example.com/day-boundary/${index}`,
+      }, true, NOW);
+      const draftId = await repository.createDraft(articleId!, "Draft", createdAt);
+      await repository.setDraftTelegramMessage(draftId, 3_000 + index);
+    }
+
+    const history = await repository.getSelectionHistory(NOW);
+
+    expect(history.delivered.map((article) => article.canonicalUrl)).toEqual([
+      "https://example.com/day-boundary/0",
+      "https://example.com/day-boundary/1",
+    ]);
+  });
+
+  it("rejects delivered history with a missing required publication date", async () => {
+    const { data: article, error: articleError } = await client.from("articles")
+      .insert({
+        canonical_url: "https://example.com/corrupt/null-date",
+        title: "Messi update",
+        source_name: "BBC Sport Football",
+        published_at: null,
+        excerpt: "",
+        eligible: true,
+        created_at: NOW.toISOString(),
+      }).select("id").single();
+    expect(articleError).toBeNull();
+    const { error: draftError } = await client.from("drafts").insert({
+      article_id: article!.id,
+      body: "Draft",
+      telegram_message_id: 4_000,
+      status: "pending",
+      created_at: NOW.toISOString(),
+    });
+    expect(draftError).toBeNull();
+
+    await expect(repository.getSelectionHistory(NOW))
+      .rejects.toThrow("repository_error:get_selection_history");
+  });
+
   it("recognizes legacy BBC tracking URLs without matching adjacent paths", async () => {
     await repository.recordArticle({ ...BASE_ARTICLE,
       canonicalUrl: "https://www.bbc.co.uk/sport/football/articles/old?at_medium=RSS&at_campaign=rss",
@@ -206,6 +305,30 @@ describe("Supabase bot repository", () => {
       "https://www.bbc.co.uk/sport/football/articles/old",
       "https://www.bbc.co.uk/sport/football/articles/old-next",
     ])).resolves.toEqual(new Set(["https://www.bbc.co.uk/sport/football/articles/old"]));
+  });
+
+  it("escapes BBC path wildcards and preserves meaningful query identity", async () => {
+    const specialBase = "https://www.bbc.co.uk/sport/football/articles/percent%25_under_score";
+    await repository.recordArticle({
+      ...BASE_ARTICLE,
+      canonicalUrl: `${specialBase}?at_campaign=rss&at_medium=RSS`,
+    }, true, NOW);
+    const meaningfulBase = "https://www.bbc.co.uk/sport/football/articles/meaningful";
+    await repository.recordArticle({
+      ...BASE_ARTICLE,
+      canonicalUrl: `${meaningfulBase}?id=one&at_campaign=rss&at_medium=RSS`,
+    }, true, NOW);
+
+    await expect(repository.getSeenUrls([
+      specialBase,
+      `${specialBase}-next`,
+      `${meaningfulBase}?id=one`,
+      `${meaningfulBase}?id=two`,
+      "https://example.com/sport/football/articles/meaningful",
+    ])).resolves.toEqual(new Set([
+      specialBase,
+      `${meaningfulBase}?id=one`,
+    ]));
   });
 
   it("marks an undelivered draft failed", async () => {
