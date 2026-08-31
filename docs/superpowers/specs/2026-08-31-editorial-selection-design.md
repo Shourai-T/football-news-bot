@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-31
 
-**Status:** Design sections approved in conversation; consolidated specification awaiting user review.
+**Status:** Consolidated specification approved by the user on 2026-08-31.
 
 **Target:** Existing Supabase bot on `feat/cloud-football-news-bot`.
 
