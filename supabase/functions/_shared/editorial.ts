@@ -1,6 +1,7 @@
 import type { Article } from "./domain-types.ts";
-import type { AnalyzedArticle, EditorialType, ScoreParts } from "./editorial-types.ts";
+import type { AnalyzedArticle, EditorialFeatures, EditorialType, EventFeatures, ScoreParts } from "./editorial-types.ts";
 import { resolveSource, type SourcePolicy } from "./feed-config.ts";
+import { parsePublicationDate } from "./feed-date.ts";
 
 export const CLASSIFIER_VERSION = "editorial-v1";
 const CLUBS = ["arsenal", "aston villa", "atletico madrid", "barcelona", "bayern munich", "borussia dortmund",
@@ -38,7 +39,7 @@ export function analyzeArticle(article: Article, policy = resolveSource(article.
   const classification = classify(title);
   const result = classification.type === "general" ? classify(text) : classification;
   const explicitDevelopment = result.explicitDevelopment && !UNCERTAIN.test(text);
-  return { article, features: {
+  const features: EditorialFeatures = {
     sourceId: policy.id,
     entities: ids.filter((id) => !id.startsWith("competition:")),
     competitions: ids.filter((id) => id.startsWith("competition:")),
@@ -47,7 +48,9 @@ export function analyzeArticle(article: Article, policy = resolveSource(article.
     credibility: policy.credibility,
     titleTokens: [...new Set(title.split(" ").filter((token) => token && !STOP_WORDS.has(token)))].sort(),
     event: null,
-  } };
+  };
+  features.event = extractEventFeatures(article, features);
+  return { article, features };
 }
 
 export function scoreArticle(item: AnalyzedArticle, now: Date): ScoreParts {
@@ -93,4 +96,53 @@ function directlyConfirmed(article: Article, text: string, policy: SourcePolicy)
 
 function containsPhrase(text: string, phrase: string): boolean {
   return ` ${text} `.includes(` ${phrase} `);
+}
+
+function extractEventFeatures(article: Article, features: EditorialFeatures): EventFeatures | null {
+  const title = normalizeWords(article.title);
+  const fullText = normalizeWords(`${article.title} ${article.excerpt}`);
+  if (/\b(?:not|never|denies|denied|could|may|might|would|or)\b/.test(fullText)) return null;
+  let canonical = title;
+  const aliases = IDENTITIES.flatMap(({ id, aliases }) => aliases.map((alias) => ({ id, alias })))
+    .sort((a, b) => b.alias.length - a.alias.length);
+  for (const { id, alias } of aliases) {
+    canonical = canonical.replace(new RegExp(`\\b${alias}\\b`, "g"), id);
+  }
+  const players = features.entities.filter((id) => id.startsWith("player:"));
+  const dates = [...article.title.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)].map(([date]) => date);
+  const date = dates.length === 1 && parsePublicationDate(`${dates[0]}T00:00:00Z`, "standard") ? dates[0]! : null;
+  let key: readonly string[] | null = null;
+  if (features.type === "transfer" && players.length === 1) {
+    const matches = [...canonical.matchAll(/\b(player:[a-z-]+) (joins|joined|signs for|signed for|agrees to join|agreed to join|linked with) (club:[a-z-]+)\b/g)];
+    if (matches.length === 1) {
+      const m = matches[0]!;
+      const stage = m[2] === "linked with" ? "rumor" : m[2]!.startsWith("agree") ? "agreed" : "completed";
+      key = ["transfer", m[1]!, m[3]!, stage];
+    }
+  } else if (features.type === "contract" && players.length === 1) {
+    const match = /\b(player:[a-z-]+) (extends?|extended|terminates?|terminated) (?:a |the |new )?contract until (\d{4})\b/.exec(canonical);
+    if (match) key = ["contract", match[1]!, match[2]!.startsWith("extend") ? "extend" : "terminate", match[3]!];
+  } else if (features.type === "injury" && players.length === 1 && date) {
+    const match = /\b(player:[a-z-]+) (suffers? (?:an? )?injury|suffered (?:an? )?injury|returns? from injury)\b/.exec(canonical);
+    if (match) key = ["injury", match[1]!, match[2]!.startsWith("return") ? "return" : "injury", date];
+  } else if (features.type === "match" && date) {
+    const match = /\b(club:[a-z-]+) (beat|beats|defeats?|defeated|draws? with|drew with) (club:[a-z-]+) (\d+) (\d+)\b/.exec(canonical);
+    if (match) key = ["match", match[1]!, match[3]!, match[2]!.startsWith("dr") ? "draw" : "win", match[4]!, match[5]!, date];
+  } else if (features.type === "quote" && players.length === 1) {
+    const quotes = [...article.title.matchAll(/["“]([^"”]+)["”]/g)];
+    if (quotes.length === 1) {
+      const quote = normalizeWords(quotes[0]![1]!);
+      if (quote.split(" ").length >= 8 && /\bplayer:[a-z-]+ (?:says|said)\b/.test(canonical)) {
+        key = ["quote", players[0]!, quote];
+      }
+    }
+  } else if (features.type === "stat" && players.length === 1) {
+    const match = /\b(player:[a-z-]+) reaches (\d+) career (goals|assists|appearances|clean sheets)\b/.exec(canonical);
+    if (match) key = ["stat", match[1]!, "career", match[3]!, match[2]!];
+  }
+  if (!key) return null;
+  const materialNumbers = [...new Set((`${article.title} ${article.excerpt}`
+    .match(/(?:[€£$]\s*)?\d+(?:[.,]\d+)*(?:\s*(?:million|billion|[mb]))?\b/gi) ?? [])
+    .map((value) => value.replace(/\s/g, "").toLowerCase()))].sort();
+  return { key: JSON.stringify(key), materialNumbers };
 }
